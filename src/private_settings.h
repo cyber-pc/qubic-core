@@ -14,6 +14,18 @@ static unsigned char computorSeeds[][55 + 1] = {
 // You can find current peer IPs at https://app.qubic.li/network/live
 static const unsigned char knownPublicPeers[][4] = {
     {127, 0, 0, 1}, // REMOVE THIS ENTRY AND REPLACE IT WITH YOUR OWN IP ADDRESSES
+     {145, 239, 161, 41 },
+    {84, 75, 0, 69},
+    {45, 152, 160, 19},
+    {45, 152, 160, 15},
+    {62, 113, 194, 90},
+    {194, 45, 36, 158},
+    {62, 2, 219, 174},
+};
+static const unsigned char whiteListPeers[][4] = {
+    // {127, 0, 0, 1}, // REMOVE THIS ENTRY AND REPLACE IT WITH YOUR OWN IP ADDRESSES
+    // {10, 29, 1, 16 },
+      {10, 29, 1, 16 },
 };
 
 #define LOG_BUFFER_SIZE 16777200 // Must be less or equal to 16777200
