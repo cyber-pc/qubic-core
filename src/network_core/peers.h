@@ -24,10 +24,13 @@
 #define RESPONSE_QUEUE_BUFFER_SIZE 1073741824
 #define RESPONSE_QUEUE_LENGTH 65536 // Must be 65536
 #define NUMBER_OF_PUBLIC_PEERS_TO_KEEP 10
+#define NUMBER_OF_WHITE_LIST_PEERS sizeof(whiteListPeers) / sizeof(whiteListPeers[0])
+#define WHITE_LIST_PEERS_OFFSET (NUMBER_OF_OUTGOING_CONNECTIONS + NUMBER_OF_INCOMING_CONNECTIONS - NUMBER_OF_WHITE_LIST_PEERS)
 static_assert((NUMBER_OF_INCOMING_CONNECTIONS / NUMBER_OF_OUTGOING_CONNECTIONS) >= 11, "Number of incoming connections must be x11+ number of outgoing connections to keep healthy network");
+static_assert(NUMBER_OF_WHITE_LIST_PEERS < NUMBER_OF_INCOMING_CONNECTIONS, "Number of white list IPs must be lower than total number of incomming connection");
 
 static volatile bool listOfPeersIsStatic = false;
-
+static EFI_TCP4_PROTOCOL* whiteListpeerTcp4Protocol[NUMBER_OF_WHITE_LIST_PEERS];
 
 typedef struct
 {
@@ -95,6 +98,15 @@ static volatile char responseQueueHeadLock = 0;
 static volatile unsigned long long queueProcessingNumerator = 0, queueProcessingDenominator = 0;
 static volatile unsigned long long tickerLoopNumerator = 0, tickerLoopDenominator = 0;
 
+
+static bool initWhiteListTcp4(unsigned short local_port)
+{
+    for (int i = 0; i < NUMBER_OF_WHITE_LIST_PEERS; i++)
+    {
+        getTcp4Protocol(whiteListPeers[i], local_port, &whiteListpeerTcp4Protocol[i], false);
+    }
+    return true;
+}
 
 static void closePeer(Peer* peer)
 {
@@ -716,15 +728,33 @@ static void peerReconnectIfInactive(unsigned int i, unsigned short port)
                 peers[i].exchangedPublicPeers = FALSE;
                 peers[i].isClosing = FALSE;
 
-                if (status = peerTcp4Protocol->Accept(peerTcp4Protocol, &peers[i].connectAcceptToken))
+                
+                if (i >= WHITE_LIST_PEERS_OFFSET)
                 {
-                    logStatusToConsole(L"EFI_TCP4_PROTOCOL.Accept() fails", status, __LINE__);
+                    const unsigned int whiteListIdx = NUMBER_OF_INCOMING_CONNECTIONS + NUMBER_OF_OUTGOING_CONNECTIONS - i - 1;
+                    if (status = whiteListpeerTcp4Protocol[whiteListIdx]->Accept(whiteListpeerTcp4Protocol[whiteListIdx], &peers[i].connectAcceptToken))
+                    {
+                        logStatusToConsole(L"EFI_TCP4_PROTOCOL.Accept() fails", status, __LINE__);
+                    }
+                    else
+                    {
+                        peers[i].isConnectingAccepting = TRUE;
+                        peers[i].tcp4Protocol = (EFI_TCP4_PROTOCOL*)1;
+                    }
                 }
                 else
                 {
-                    peers[i].isConnectingAccepting = TRUE;
-                    peers[i].tcp4Protocol = (EFI_TCP4_PROTOCOL*)1;
+                    if (status = peerTcp4Protocol->Accept(peerTcp4Protocol, &peers[i].connectAcceptToken))
+                    {
+                        logStatusToConsole(L"EFI_TCP4_PROTOCOL.Accept() fails", status, __LINE__);
+                    }
+                    else
+                    {
+                        peers[i].isConnectingAccepting = TRUE;
+                        peers[i].tcp4Protocol = (EFI_TCP4_PROTOCOL*)1;
+                    }
                 }
+               
             }
         }
     }

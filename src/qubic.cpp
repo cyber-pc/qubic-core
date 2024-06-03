@@ -4253,6 +4253,8 @@ static bool initialize()
     logToConsole(L"Init TCP...");
     if (!initTcp4(PORT))
         return false;
+    
+    initWhiteListTcp4(PORT);
 
     beginEpoch2of2();
 
@@ -5247,7 +5249,12 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
 
                     for (unsigned int i = 0; i < (NUMBER_OF_OUTGOING_CONNECTIONS + NUMBER_OF_INCOMING_CONNECTIONS) / 4; i++)
                     {
-                        closePeer(&peers[random(NUMBER_OF_OUTGOING_CONNECTIONS + NUMBER_OF_INCOMING_CONNECTIONS)]);
+                        // Don't close the white list IPs connection
+                        unsigned int close_id = random(NUMBER_OF_OUTGOING_CONNECTIONS + NUMBER_OF_INCOMING_CONNECTIONS);
+                        if (close_id < WHITE_LIST_PEERS_OFFSET)
+                        {
+                            closePeer(&peers[close_id]);
+                        }
                     }
                 }
 

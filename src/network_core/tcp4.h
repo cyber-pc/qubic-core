@@ -19,7 +19,7 @@ static EFI_TCP4_PROTOCOL* peerTcp4Protocol = NULL;
 static EFI_HANDLE peerChildHandle = NULL;
 
 
-static EFI_HANDLE getTcp4Protocol(const unsigned char* remoteAddress, const unsigned short port, EFI_TCP4_PROTOCOL** tcp4Protocol)
+static EFI_HANDLE getTcp4Protocol(const unsigned char* remoteAddress, const unsigned short port, EFI_TCP4_PROTOCOL** tcp4Protocol, bool activeConnection = true)
 {
     EFI_STATUS status;
     EFI_HANDLE childHandle = NULL;
@@ -46,12 +46,13 @@ static EFI_HANDLE getTcp4Protocol(const unsigned char* remoteAddress, const unsi
             if (!remoteAddress)
             {
                 configData.AccessPoint.StationPort = port;
+                configData.AccessPoint.ActiveFlag = FALSE;
             }
             else
             {
                 *((int*)configData.AccessPoint.RemoteAddress.Addr) = *((int*)remoteAddress);
                 configData.AccessPoint.RemotePort = port;
-                configData.AccessPoint.ActiveFlag = TRUE;
+                configData.AccessPoint.ActiveFlag = activeConnection;
             }
             EFI_TCP4_OPTION option;
             bs->SetMem(&option, sizeof(option), 0);
@@ -127,6 +128,15 @@ static EFI_HANDLE getTcp4Protocol(const unsigned char* remoteAddress, const unsi
                                 appendText(message, L".");
                                 logToConsole(message);
                             }
+                        }
+                        else
+                        {
+                            setText(message, L"Remote address = ");
+                            appendIPv4Address(message, configData.AccessPoint.RemoteAddress);
+                            appendText(message, L":");
+                            appendNumber(message, configData.AccessPoint.RemotePort, FALSE);
+                            appendText(message, L".");
+                            logToConsole(message);
                         }
 
                         return childHandle;
