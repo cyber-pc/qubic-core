@@ -4587,15 +4587,6 @@ static bool initialize()
         peers[i].transmitToken.CompletionToken.Status = -1;
         peers[i].transmitToken.Packet.TxData = &peers[i].transmitData;
 
-        // Init the connection type as 
-        if (i < NUMBER_OF_OUTGOING_CONNECTIONS)
-        {
-            peers[i].isIncommingConnection = FALSE;
-        }
-        else
-        {
-            peers[i].isIncommingConnection = TRUE;
-        }
     }
 
     // add knownPublicPeers to list of peers (all with verified status)
