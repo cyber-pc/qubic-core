@@ -7,6 +7,7 @@ unsigned long long top_of_stack;
 #include "platform/concurrency.h"
 #include "public_settings.h"
 #include "score_cache.h"
+#include "../test/profile.h"
 
 
 ////////// Scoring algorithm \\\\\\\\\\
@@ -647,7 +648,11 @@ struct ScoreFunction
         int score = 0;
 #if USE_SCORE_CACHE
         unsigned int scoreCacheIndex = scoreCache.getCacheIndex(publicKey, nonce);
-        score = scoreCache.tryFetching(publicKey, nonce, scoreCacheIndex);
+        {
+            PROFILE_SECTION("scoreCache.tryFetching");
+            score = scoreCache.tryFetching(publicKey, nonce, scoreCacheIndex);
+            PROFILE_SECTION_END();
+        }
         if (score >= scoreCache.MIN_VALID_SCORE)
         {
             return score;
@@ -660,45 +665,56 @@ struct ScoreFunction
 
         auto& synapses = _synapses[solutionBufIdx];
         auto& cb = _computeBuffer[solutionBufIdx];
-
-        generateSynapse(cb, solutionBufIdx, publicKey, nonce);
-        cb.inputLength = synapses.inputLength;
-
         {
-            setMem(cb.bucketPos, sizeof(cb.bucketPos), 0);
-            setMem(cb.isGeneratedBucket, sizeof(cb.isGeneratedBucket), false);
+            PROFILE_SECTION("generateSynapse");
+            generateSynapse(cb, solutionBufIdx, publicKey, nonce);
+            PROFILE_SECTION_END();
         }
-
-        // ComputeInput
         {
-            setMem(cb.neurons.inputAtTick, sizeof(cb.neurons.inputAtTick), NOT_CALCULATED);
-            for (int i = 0; i < dataLength; i++) {
-                cb.neurons.inputAtTick[0][i] = (char)miningData[i];
-                cb.neurons.inputAtTick[1][i] = (char)miningData[i];
+            PROFILE_SECTION("Remained");
+            cb.inputLength = synapses.inputLength;
+
+            {
+                setMem(cb.bucketPos, sizeof(cb.bucketPos), 0);
+                setMem(cb.isGeneratedBucket, sizeof(cb.isGeneratedBucket), false);
             }
 
-            setMem(cb.neurons.inputAtTick[0] + dataLength, inNeuronsCount * sizeof(cb.neurons.inputAtTick[0][0]), 0);
-            for (unsigned int inputNeuronIndex = numberOfInputNeurons; inputNeuronIndex < numberOfInputNeurons + dataLength; inputNeuronIndex++) {
-                fullComputeNeuron<dataLength>(1,
-                    inputNeuronIndex,
-                    cb,
-                    cb.neurons.inputAtTick[1],
-                    synapses.inputLength,
-                    dataLength + inputNeuronIndex);
-            }
-            for (int tick = 2; tick <= maxInputDuration; tick++)
+            // ComputeInput
             {
+                setMem(cb.neurons.inputAtTick, sizeof(cb.neurons.inputAtTick), NOT_CALCULATED);
+                for (int i = 0; i < dataLength; i++) {
+                    cb.neurons.inputAtTick[0][i] = (char)miningData[i];
+                    cb.neurons.inputAtTick[1][i] = (char)miningData[i];
+                }
+
+                setMem(cb.neurons.inputAtTick[0] + dataLength, inNeuronsCount * sizeof(cb.neurons.inputAtTick[0][0]), 0);
                 for (unsigned int inputNeuronIndex = numberOfInputNeurons; inputNeuronIndex < numberOfInputNeurons + dataLength; inputNeuronIndex++) {
-                    cb.neurons.inputAtTick[tick][dataLength + inputNeuronIndex] = solveNeuron<dataLength, true>(cb, tick, dataLength + inputNeuronIndex);
+                    fullComputeNeuron<dataLength>(1,
+                        inputNeuronIndex,
+                        cb,
+                        cb.neurons.inputAtTick[1],
+                        synapses.inputLength,
+                        dataLength + inputNeuronIndex);
+                }
+                for (int tick = 2; tick <= maxInputDuration; tick++)
+                {
+                    for (unsigned int inputNeuronIndex = numberOfInputNeurons; inputNeuronIndex < numberOfInputNeurons + dataLength; inputNeuronIndex++) {
+                        cb.neurons.inputAtTick[tick][dataLength + inputNeuronIndex] = solveNeuron<dataLength, true>(cb, tick, dataLength + inputNeuronIndex);
+                    }
                 }
             }
+            PROFILE_SECTION_END();
         }
 
         score = 0;
-        for (unsigned int i = 0; i < dataLength; i++) {
-            if (miningData[i] == cb.neurons.inputAtTick[maxInputDuration][dataLength + numberOfInputNeurons + i]) {
-                score++;
+        {
+            PROFILE_SECTION("scoreFinal");
+            for (unsigned int i = 0; i < dataLength; i++) {
+                if (miningData[i] == cb.neurons.inputAtTick[maxInputDuration][dataLength + numberOfInputNeurons + i]) {
+                    score++;
+                }
             }
+            PROFILE_SECTION_END();
         }
 
         RELEASE(solutionEngineLock[solutionBufIdx]);
@@ -710,6 +726,8 @@ struct ScoreFunction
         unsigned long long ss = top_of_stack - ((unsigned long long)(&y));
         std::cout << "Stack size: " << ss << " bytes\n";
 #endif
+
+
         return score;
     }
 

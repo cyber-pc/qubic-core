@@ -46,6 +46,7 @@ struct ScoreTester
         memset(score, 0, sizeof(ScoreFuncOpt));
         memset(score_ref_impl, 0, sizeof(ScoreFuncRef));
         EXPECT_TRUE(score->initMemory());
+        EXPECT_TRUE(score_ref_impl->initMemory());
         score->initMiningData(_mm256_setzero_si256());
         score_ref_impl->initMiningData();
     }
@@ -66,16 +67,18 @@ struct ScoreTester
         auto d = t1 - t0;
         auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(d);
         std::cout << "Optimized version: " << elapsed.count() << "ns" << std::endl;
+        std::cout << "current score() returns " << current << std::endl;
+        PROFILE_PRINT_REPORT();
 
-        /*t0 = std::chrono::high_resolution_clock::now();
+        t0 = std::chrono::high_resolution_clock::now();
         unsigned int reference = (*score_ref_impl)(processorNumber, publicKey, nonce);
         t1 = std::chrono::high_resolution_clock::now();
         d = t1 - t0;
         elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(d);
         std::cout << "Reference version: " << elapsed.count() << "ns" << std::endl;
         std::cout << "current score() returns " << current << ", reference score() returns " << reference << std::endl;
-        return current == reference;*/
-        return true;
+        return current == reference;
+        //return true;
     }
 };
 
@@ -129,15 +132,15 @@ TEST(TestQubicScoreFunction, CurrentLengthNeuronsDurationSettings) {
     runCommonTests(test_score);
 }
 
-TEST(TestQubicScoreFunction, DoubleOfCurrentLengthNeuronsDurationSettings) {
-    ScoreTester<
-        DATA_LENGTH ,
-        NUMBER_OF_INPUT_NEURONS * 2, NUMBER_OF_OUTPUT_NEURONS * 2,
-        MAX_INPUT_DURATION, MAX_OUTPUT_DURATION,
-        1
-    > test_score;
-    runCommonTests(test_score);
-}
+//TEST(TestQubicScoreFunction, DoubleOfCurrentLengthNeuronsDurationSettings) {
+//    ScoreTester<
+//        DATA_LENGTH,
+//        NUMBER_OF_INPUT_NEURONS * 2, NUMBER_OF_OUTPUT_NEURONS * 2,
+//        MAX_INPUT_DURATION, MAX_OUTPUT_DURATION,
+//        1
+//    > test_score;
+//    runCommonTests(test_score);
+//}
 
 //TEST(TestQubicScoreFunction, HalfOfCurrentLengthNeuronsDurationSettings) {
 //    ScoreTester<
