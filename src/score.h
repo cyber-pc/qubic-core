@@ -28,10 +28,33 @@ struct ScoreFunction
     static constexpr const int maxNeuronsCount = inNeuronsCount;
     static constexpr const int allParamsCount = dataLength + numberOfInputNeurons + dataLength;
     long long miningData[dataLength];
+   /* struct synapseStruct
+    {
+        char inputLength[(unsigned long long)inNeuronsCount * allParamsCount];
+    } *_synapses;*/
+
+    /*struct synapseStruct
+    {
+        char* inputLength = NULL;
+        synapseStruct()
+        {
+            inputLength = new char[(unsigned long long)inNeuronsCount * allParamsCount];
+        }
+        ~synapseStruct()
+        {
+            if (inputLength)
+            {
+                delete[] inputLength;
+            }
+            inputLength = NULL;
+        }
+    };*/
+
     struct synapseStruct
     {
-        char inputLength[inNeuronsCount * allParamsCount];
-    } *_synapses;
+        char* inputLength = NULL;
+    };
+    synapseStruct*_synapses;
 
     struct queueItem {
         unsigned int tick;
@@ -44,7 +67,7 @@ struct ScoreFunction
 
     struct synapseCheckpoint {
         unsigned long long ckp[25];
-        int ignoreByteInState;
+        long long ignoreByteInState;
     };
 
     struct K12EngineX1 {
@@ -54,7 +77,7 @@ struct ScoreFunction
         unsigned long long Ama, Ame, Ami, Amo, Amu;
         unsigned long long Asa, Ase, Asi, Aso, Asu;
         unsigned long long scatteredStates[25];
-        int leftByteInCurrentState;
+        long long leftByteInCurrentState;
     private:
         void _scatterFromVector() {
             copyToStateScalar(scatteredStates)
@@ -82,10 +105,10 @@ struct ScoreFunction
             Ago = Agu = Aka = Ake = Aki = Ako = Aku = Ama = Ame = Ami = Amo = Amu = Asa = Ase = Asi = Aso = Asu = 0;
             leftByteInCurrentState = 0;
         }
-        void write(unsigned char* out0, int size) {
+        void write(unsigned char* out0, long long size) {
             unsigned char* s0 = (unsigned char*)scatteredStates;
             if (leftByteInCurrentState) {
-                int copySize = size < leftByteInCurrentState ? size : leftByteInCurrentState;
+                long long copySize = size < leftByteInCurrentState ? size : leftByteInCurrentState;
                 copyMem(out0, s0 + 200 - leftByteInCurrentState, copySize);
                 size -= copySize;
                 leftByteInCurrentState -= copySize;
@@ -95,7 +118,7 @@ struct ScoreFunction
                 if (!leftByteInCurrentState) {
                     hashNewChunkAndSaveToState();
                 }
-                int copySize = size < leftByteInCurrentState ? size : leftByteInCurrentState;
+                long long copySize = size < leftByteInCurrentState ? size : leftByteInCurrentState;
                 copyMem(out0, s0 + 200 - leftByteInCurrentState, copySize);
                 size -= copySize;
                 leftByteInCurrentState -= copySize;
@@ -113,9 +136,9 @@ struct ScoreFunction
         void scatterFromVector() {
             _scatterFromVector();
         }
-        void hashWithoutWrite(int size) {
+        void hashWithoutWrite(long long size) {
             if (leftByteInCurrentState) {
-                int copySize = size < leftByteInCurrentState ? size : leftByteInCurrentState;
+                long long copySize = size < leftByteInCurrentState ? size : leftByteInCurrentState;
                 size -= copySize;
                 leftByteInCurrentState -= copySize;
             }
@@ -124,7 +147,7 @@ struct ScoreFunction
                     hashNewChunk();
                     leftByteInCurrentState = 200;
                 }
-                int copySize = size < leftByteInCurrentState ? size : leftByteInCurrentState;
+                long long copySize = size < leftByteInCurrentState ? size : leftByteInCurrentState;
                 size -= copySize;
                 leftByteInCurrentState -= copySize;
             }
@@ -198,6 +221,15 @@ struct ScoreFunction
                 logToConsole(L"Failed to allocate memory for score solution buffer!");
                 return false;
             }
+            for (unsigned long long i = 0; i < solutionBufferCount; i++)
+            {
+                _synapses[i].inputLength = nullptr;
+                if (!allocatePool((unsigned long long)inNeuronsCount * allParamsCount, (void**)(&_synapses[i].inputLength)))
+                {
+                    logToConsole(L"Failed to allocate memory for score solution buffer!");
+                    return false;
+                }
+            }
         }
         if (_computeBuffer == nullptr) {
             if (!allocatePool(sizeof(computeBuffer) * solutionBufferCount, (void**)&_computeBuffer))
@@ -225,7 +257,9 @@ struct ScoreFunction
         }
 
         for (int i = 0; i < solutionBufferCount; i++) {
-            setMem(&_synapses[i], sizeof(synapseStruct), 0);
+            //setMem(&_synapses[i], sizeof(synapseStruct), 0);
+            setMem(_synapses[i].inputLength, (unsigned long long)inNeuronsCount * allParamsCount, 0);
+
             setMem(&_computeBuffer[i].neurons, sizeof(_computeBuffer[i].neurons), 0);            
             _computeBuffer[i].inputLength = nullptr;
             setMem(_computeBuffer[i].indicePos[0], sizeof(unsigned int) * allParamsCount * maxNeuronsCount, 0); // it's continuous memory region
@@ -247,6 +281,24 @@ struct ScoreFunction
         setMem(&scoreCache, sizeof(scoreCache), 0);
 #endif
         return true;
+    }
+    void freeMemory()
+    {
+        if (_synapses) {
+            for (unsigned long long i = 0; i < solutionBufferCount; i++)
+            {
+                freePool(_synapses[i].inputLength);
+                _synapses[i].inputLength = nullptr;
+            }
+
+            freePool(_synapses);
+            _synapses = nullptr;
+        }
+    }
+
+    ~ScoreFunction()
+    {
+        freeMemory();
     }
 
     // Save score cache to SCORE_CACHE_FILE_NAME
@@ -294,11 +346,11 @@ struct ScoreFunction
         }
     }
 
-    static inline void zeroOutSynapses(char* synapses, int idx) {
+    static inline void zeroOutSynapses(char* synapses, unsigned long long idx) {
         synapses[idx + dataLength] = 0;
     }
 
-    void continueGeneratingSynapseFromCkp(synapseCheckpoint& ckp, unsigned char* out, int size) {
+    void continueGeneratingSynapseFromCkp(synapseCheckpoint& ckp, unsigned char* out, long long size) {
         unsigned long long buffer[25];
         unsigned char* buffer_u8 = (unsigned char*)buffer;
         unsigned long long* state = ckp.ckp;
@@ -306,9 +358,9 @@ struct ScoreFunction
 
         declareABCDEScalar
             copyFromStateScalar(state)
-            int leftByte = 200 - ckp.ignoreByteInState;
+            long long leftByte = 200 - ckp.ignoreByteInState;
         if (leftByte) {
-            int copySize = leftByte < size ? leftByte : size;
+            long long copySize = leftByte < size ? leftByte : size;
             copyMem(out, state_u8 + 200 - leftByte, copySize);
             out += copySize;
             size -= copySize;
@@ -320,7 +372,7 @@ struct ScoreFunction
                     copyToStateScalar(buffer)
                     leftByte = 200;
             }
-            int copySize = leftByte < size ? leftByte : size;
+            long long copySize = leftByte < size ? leftByte : size;
             copyMem(out, buffer_u8 + 200 - leftByte, copySize);
             size -= copySize;
             leftByte -= copySize;
@@ -344,7 +396,7 @@ struct ScoreFunction
             cb.isGeneratedSynapse[i] = true;
         }
         for (unsigned long long i = numberOfInputNeurons; i < inNeuronsCount; i++) {
-            zeroOutSynapses(synapses.inputLength + i * allParamsCount, int(i));
+            zeroOutSynapses(synapses.inputLength + i * allParamsCount, i);
         }
     }
 
@@ -439,7 +491,7 @@ struct ScoreFunction
         const int outNrIdx) {
         char v = 0;
         for (int i = 0; i < neurBefore; i++) {
-            int idx = neuronIdx * allParamsCount + i;
+            unsigned long long idx = neuronIdx * allParamsCount + i;
             const char s = sy[idx];
             if (s == 1 || s == -1 && pNr[i])
             {
