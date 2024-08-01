@@ -5277,7 +5277,29 @@ static void logInfo()
     }
     appendText(message, L" mcs | Total Qx execution time = ");
     appendNumber(message, contractTotalExecutionTicks[QX_CONTRACT_INDEX] * 1000 / frequency, TRUE);
-    appendText(message, L" ms | Solution process time = ");
+
+    appendText(message, L" ms | Transfer benchmark (rate, ntrans) = ");
+    static unsigned long long qutils_execution_time = 0; 
+    static unsigned long long qutils_execution_transfer_rate = 0;
+    static unsigned long long total_transfer = 0;
+   
+    ACQUIRE(qutilsBenchmarkLock);
+    total_transfer = qutilsBenchmarkTransfer;
+    qutils_execution_time = qutilsBenchmarkTime;
+    RELEASE(qutilsBenchmarkLock);
+
+    if (total_transfer > 0)
+    {
+        if (qutils_execution_time > 0)
+        {
+            qutils_execution_transfer_rate = total_transfer * frequency / qutils_execution_time;
+        }
+    }
+    appendNumber(message, qutils_execution_transfer_rate, TRUE);
+    appendText(message, L" tr/s, ");
+    appendNumber(message, total_transfer, TRUE);
+
+    appendText(message, L" | Solution process time = ");
     appendNumber(message, solutionTotalExecutionTicks * 1000 / frequency, TRUE);
     appendText(message, L" ms.");
     logToConsole(message);

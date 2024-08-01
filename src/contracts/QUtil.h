@@ -1,3 +1,6 @@
+
+#include "platform/read_write_lock.h"
+
 using namespace QPI;
 /**************************************/
 /**************SC UTILS****************/
@@ -17,6 +20,9 @@ using namespace QPI;
 #define STM1_TRIGGERED 3
 #define STM1_SEND_FUND 4
 #define STM1_INVOCATION_FEE 10LL // fee to be burned and make the SC running
+
+constexpr unsigned long long QUTIL_SEND_TO_MANY_BENCHMARK = 1000000;
+
 struct QUtilLogger
 {
     uint32 contractId; // to distinguish bw SCs
@@ -32,6 +38,11 @@ struct QUtilLogger
 struct QUTIL2
 {
 };
+
+
+static unsigned long long qutilsBenchmarkTransfer = 0;
+static unsigned long long qutilsBenchmarkTime = 0;
+static char qutilsBenchmarkLock = 0;
 
 struct QUTIL
 {
@@ -56,6 +67,23 @@ public:
     struct SendToManyV1_output
     {
         sint32 returnCode;
+    };
+
+    struct SendToManyBenchmark_input
+    {
+        sint64 dstCount;
+    };
+    struct SendToManyBenchmark_output
+    {
+        sint64 dstCount;
+        sint32 returnCode;
+    };
+
+    struct SendToManyBenchmark_locals
+    {
+        id currentId;
+        sint32 i;
+        sint64 amount;
     };
 
     struct GetSendToManyV1Fee_input
@@ -273,7 +301,68 @@ public:
         LOG_INFO(state.logger);
         output.returnCode = STM1_SUCCESS;
         qpi.burn(STM1_INVOCATION_FEE);
-    _
+        _
+
+            /**
+        * Send qu from a single address to multiple addresses
+        * @param number of addresses will be send a random qubics
+        * @return returnCode (0 means success)
+        */
+        PUBLIC_PROCEDURE_WITH_LOCALS(SendToManyBenchmark)
+            state.logger = QUtilLogger{ 0,  0, qpi.invocator(), SELF, input.dstCount, STM1_TRIGGERED };
+            LOG_INFO(state.logger);
+            state.total = 0;
+            output.dstCount = 0;
+
+            // insufficient number of addresses
+            if (input.dstCount <= 0 || input.dstCount > QUTIL_SEND_TO_MANY_BENCHMARK)
+            {
+                if (qpi.invocationReward() > 0)
+                {
+                    qpi.transfer(qpi.invocator(), qpi.invocationReward());
+                }
+                state.logger = QUtilLogger{ 0,  0, qpi.invocator(), SELF, input.dstCount, STM1_INVALID_AMOUNT_NUMBER };
+                LOG_INFO(state.logger);
+                output.returnCode = STM1_INVALID_AMOUNT_NUMBER;
+                return;
+            }
+
+            // Check the fund is enough
+            locals.amount = (256 + 10) * input.dstCount;
+            if (qpi.invocationReward() < locals.amount)
+            {
+                if (qpi.invocationReward() > 0)
+                {
+                    qpi.transfer(qpi.invocator(), qpi.invocationReward());
+                }
+                state.logger = QUtilLogger{ 0,  0, qpi.invocator(), SELF, input.dstCount, STM1_INVALID_AMOUNT_NUMBER };
+                LOG_INFO(state.logger);
+                output.returnCode = STM1_INVALID_AMOUNT_NUMBER;
+                return;
+            }
+
+            // Loop though the number of addresses and do the transfer
+            locals.currentId = qpi.invocator();
+            for (locals.i = 0; locals.i < input.dstCount; locals.i++)
+            {
+                // Next IDs
+                locals.currentId = qpi.nextId(locals.currentId);
+                // Get first byte as a random money
+                locals.amount = locals.currentId.m256i_u8[0] + 10;
+                qpi.transfer(locals.currentId, locals.amount);
+                state.total = state.total + locals.amount;
+            }
+
+            // Return the change if there is any
+            if (state.total < qpi.invocationReward())
+            {
+                qpi.transfer(qpi.invocator(), qpi.invocationReward() - state.total);
+            }
+
+            output.dstCount = input.dstCount;
+            state.logger = QUtilLogger{ 0,  0, qpi.invocator(), SELF, state.total, STM1_SUCCESS };
+            LOG_INFO(state.logger);
+        _
 
     /**
     * Practicing burning qubic in the QChurch
@@ -312,6 +401,7 @@ public:
 
         REGISTER_USER_PROCEDURE(SendToManyV1, 1);
         REGISTER_USER_PROCEDURE(BurnQubic, 2);
+        REGISTER_USER_PROCEDURE(SendToManyBenchmark, 3);
     _
 
     INITIALIZE
