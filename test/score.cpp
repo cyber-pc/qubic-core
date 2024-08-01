@@ -128,11 +128,11 @@ TEST(TestQubicScoreFunction, CurrentLengthNeuronsDurationSettings) {
     runCommonTests(test_score);
 }
 
-TEST(TestQubicScoreFunction, HalfOfCurrentLengthNeuronsDurationSettings) {
+TEST(TestQubicScoreFunction, CurrentLengthNeuronsDurationSettingsDoubleDuration) {
     ScoreTester<
-        DATA_LENGTH/2,
-        NUMBER_OF_INPUT_NEURONS/2, NUMBER_OF_OUTPUT_NEURONS/2,
-        MAX_INPUT_DURATION/2, MAX_OUTPUT_DURATION/2,
+        DATA_LENGTH,
+        NUMBER_OF_INPUT_NEURONS, NUMBER_OF_OUTPUT_NEURONS,
+        MAX_INPUT_DURATION * 2, MAX_OUTPUT_DURATION * 2,
         1
     > test_score;
     runCommonTests(test_score);
