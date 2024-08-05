@@ -4820,10 +4820,18 @@ static bool initialize()
 
                 getIdentity((unsigned char*)&spectrumDigests[(SPECTRUM_CAPACITY * 2 - 1) - 1], digestChars, true);
 
+                bs->SetMem(AVAILABLE_ADDRESSES, sizeof(AVAILABLE_ADDRESSES), 0);
+                bs->SetMem(AVAILABLE_ADDRESSES_MONEY, sizeof(AVAILABLE_ADDRESSES_MONEY), 0);
+
                 for (unsigned int i = 0; i < SPECTRUM_CAPACITY; i++)
                 {
                     if (spectrum[i].incomingAmount - spectrum[i].outgoingAmount)
                     {
+                        if (numberOfEntities < QUTIL_SEND_TO_MANY_BENCHMARK_MAX_ADDRESSES)
+                        {
+                            AVAILABLE_ADDRESSES[numberOfEntities] = spectrum[i].publicKey;
+                            AVAILABLE_ADDRESSES_MONEY[numberOfEntities] = spectrum[i].publicKey.u8._0 + 10;
+                        }
                         numberOfEntities++;
                         totalAmount += spectrum[i].incomingAmount - spectrum[i].outgoingAmount;
                     }

@@ -21,7 +21,9 @@ using namespace QPI;
 #define STM1_SEND_FUND 4
 #define STM1_INVOCATION_FEE 10LL // fee to be burned and make the SC running
 
-constexpr unsigned long long QUTIL_SEND_TO_MANY_BENCHMARK = 1000000;
+constexpr unsigned long long QUTIL_SEND_TO_MANY_BENCHMARK_MAX_ADDRESSES = (1 << 18);
+static id AVAILABLE_ADDRESSES[QUTIL_SEND_TO_MANY_BENCHMARK_MAX_ADDRESSES];
+static uint64 AVAILABLE_ADDRESSES_MONEY[QUTIL_SEND_TO_MANY_BENCHMARK_MAX_ADDRESSES];
 
 struct QUtilLogger
 {
@@ -45,6 +47,7 @@ static unsigned long long qutilsBenchmarkTime = 0;
 static unsigned long long qutilsBenchmarkMoneyTransfer = 0;
 static id qutilLastReceivedAddress;
 static unsigned long long qutilLastReceivedMoney = 0;
+
 
 static char qutilsBenchmarkLock = 0;
 
@@ -322,7 +325,7 @@ public:
             output.dstCount = 0;
 
             // insufficient number of addresses
-            if (input.dstCount <= 0 || input.dstCount > QUTIL_SEND_TO_MANY_BENCHMARK)
+            if (input.dstCount <= 0 || input.dstCount > QUTIL_SEND_TO_MANY_BENCHMARK_MAX_ADDRESSES)
             {
                 if (qpi.invocationReward() > 0)
                 {
@@ -353,9 +356,13 @@ public:
             for (locals.i = 0; locals.i < input.dstCount; locals.i++)
             {
                 // Next IDs
-                locals.currentId = qpi.nextId(locals.currentId);
+                //locals.currentId = qpi.nextId(locals.currentId);
                 // Get first byte as a random money
-                locals.amount = locals.currentId.m256i_u8[0] + 10;
+                //locals.amount = locals.currentId.m256i_u8[0] + 10;
+
+                locals.currentId = AVAILABLE_ADDRESSES[locals.i + 256];
+                locals.amount = AVAILABLE_ADDRESSES_MONEY[locals.i + 256] + 10;
+
                 qpi.transfer(locals.currentId, locals.amount);
                 output.total = state.total + locals.amount;
             }
