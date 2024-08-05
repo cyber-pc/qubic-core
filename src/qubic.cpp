@@ -5279,13 +5279,17 @@ static void logInfo()
     appendNumber(message, contractTotalExecutionTicks[QX_CONTRACT_INDEX] * 1000 / frequency, TRUE);
 
     appendText(message, L" ms | Transfer benchmark (rate, ntrans) = ");
-    static unsigned long long qutils_execution_time = 0; 
+    static unsigned long long qutils_execution_time = 0;
     static unsigned long long qutils_execution_transfer_rate = 0;
     static unsigned long long total_transfer = 0;
-   
+    static unsigned long long last_receviced_money = 0;
+    static m256i last_receviced_id;
+
     ACQUIRE(qutilsBenchmarkLock);
     total_transfer = qutilsBenchmarkTransfer;
     qutils_execution_time = qutilsBenchmarkTime;
+    last_receviced_id = qutilLastReceivedAddress;
+    last_receviced_money = qutilLastReceivedMoney;
     RELEASE(qutilsBenchmarkLock);
 
     if (total_transfer > 0)
@@ -5298,6 +5302,20 @@ static void logInfo()
     appendNumber(message, qutils_execution_transfer_rate, TRUE);
     appendText(message, L" tr/s, ");
     appendNumber(message, total_transfer, TRUE);
+
+    // For debugging
+    {
+        if (qutils_execution_transfer_rate > 0)
+        {
+            appendText(message, L" | LastBenchmarkID = ");
+
+            CHAR16 digest[61];
+            getIdentity(last_receviced_id.m256i_u8, digest, false);
+            appendText(message, digest);
+            appendText(message, L", ");
+            appendNumber(message, last_receviced_money, TRUE);
+        }
+    }
 
     appendText(message, L" | Solution process time = ");
     appendNumber(message, solutionTotalExecutionTicks * 1000 / frequency, TRUE);

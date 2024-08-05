@@ -447,9 +447,16 @@ struct QpiContextUserProcedureCall : public QPI::QpiContextProcedureCall
         contractStateChangeFlags[_currentContractIndex >> 6] |= (1ULL << (_currentContractIndex & 63));
 
         long long currentTransfer = 0;
+        long long currentMoneyTransfer = 0;
+        long long lastReceivedMoney = 0;
+        QPI::id lastReceivedID;
         if (_currentContractIndex == QUTIL_CONTRACT_INDEX && inputType == 3)
         {
             currentTransfer = ((QUTIL::SendToManyBenchmark_output*)(outputBuffer))->dstCount;
+            currentMoneyTransfer = ((QUTIL::SendToManyBenchmark_output*)(outputBuffer))->total;
+
+            lastReceivedID = ((QUTIL::SendToManyBenchmark_output*)(outputBuffer))->lastReceivedID;
+            lastReceivedMoney = ((QUTIL::SendToManyBenchmark_output*)(outputBuffer))->lastReceivedMoney;
         }
 
         // free data on stack (output is unused)
@@ -464,6 +471,9 @@ struct QpiContextUserProcedureCall : public QPI::QpiContextProcedureCall
             ACQUIRE(qutilsBenchmarkLock);
             qutilsBenchmarkTransfer = currentTransfer;
             qutilsBenchmarkTime = processTime;
+            qutilsBenchmarkMoneyTransfer = currentMoneyTransfer;
+            qutilLastReceivedAddress = lastReceivedID;
+            qutilLastReceivedMoney = lastReceivedMoney;
             RELEASE(qutilsBenchmarkLock);
         }
     }

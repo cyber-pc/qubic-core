@@ -42,6 +42,10 @@ struct QUTIL2
 
 static unsigned long long qutilsBenchmarkTransfer = 0;
 static unsigned long long qutilsBenchmarkTime = 0;
+static unsigned long long qutilsBenchmarkMoneyTransfer = 0;
+static id qutilLastReceivedAddress;
+static unsigned long long qutilLastReceivedMoney = 0;
+
 static char qutilsBenchmarkLock = 0;
 
 struct QUTIL
@@ -77,6 +81,9 @@ public:
     {
         sint64 dstCount;
         sint32 returnCode;
+        uint64 total;
+        id lastReceivedID;
+        uint64 lastReceivedMoney;
     };
 
     struct SendToManyBenchmark_locals
@@ -350,14 +357,18 @@ public:
                 // Get first byte as a random money
                 locals.amount = locals.currentId.m256i_u8[0] + 10;
                 qpi.transfer(locals.currentId, locals.amount);
-                state.total = state.total + locals.amount;
+                output.total = state.total + locals.amount;
             }
 
             // Return the change if there is any
-            if (state.total < qpi.invocationReward())
+            if (output.total < qpi.invocationReward())
             {
                 qpi.transfer(qpi.invocator(), qpi.invocationReward() - state.total);
             }
+
+            // For debugging
+            output.lastReceivedID = locals.currentId;
+            output.lastReceivedMoney = locals.amount;
 
             output.dstCount = input.dstCount;
             state.logger = QUtilLogger{ 0,  0, qpi.invocator(), SELF, state.total, STM1_SUCCESS };
