@@ -433,7 +433,7 @@ static void enableAVX()
 {
     __writecr4(__readcr4() | 0x40000);
     _xsetbv(_XCR_XFEATURE_ENABLED_MASK, _xgetbv(_XCR_XFEATURE_ENABLED_MASK) | (7
-#ifdef __AVX512F__
+#if defined (__AVX512F__) && !GENERIC_K12
         | 224
 #endif
         ));
@@ -4667,7 +4667,7 @@ static bool initialize()
 {
     enableAVX();
 
-#ifdef __AVX512F__
+#if defined (__AVX512F__) && !GENERIC_K12
     initAVX512KangarooTwelveConstants();
     initAVX512FourQConstants();
 #endif
