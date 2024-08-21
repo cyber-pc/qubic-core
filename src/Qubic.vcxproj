@@ -172,7 +172,7 @@
       <OmitFramePointers>true</OmitFramePointers>
       <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
       <ControlFlowGuard>false</ControlFlowGuard>
-      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
       <FloatingPointExceptions>false</FloatingPointExceptions>
       <CreateHotpatchableImage>false</CreateHotpatchableImage>
       <GuardEHContMetadata>false</GuardEHContMetadata>

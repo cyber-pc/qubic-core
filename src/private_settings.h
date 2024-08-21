@@ -14,6 +14,10 @@ static unsigned char computorSeeds[][55 + 1] = {
 // You can find current peer IPs at https://app.qubic.li/network/live
 static const unsigned char knownPublicPeers[][4] = {
     {127, 0, 0, 1}, // REMOVE THIS ENTRY AND REPLACE IT WITH YOUR OWN IP ADDRESSES
+    {84,75,0,69},
+    {5,39,216,222},
+    {5,39,216,39},
+    {45,152,160,21},
 };
 
 // Enter static IPs that shall be prioritized in incoming connection
