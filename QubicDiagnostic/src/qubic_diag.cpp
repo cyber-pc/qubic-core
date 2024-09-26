@@ -281,14 +281,13 @@ bool RunScoreSetting(unsigned long long processID)
 
         // Run score computation
         unsigned long long startTime = __rdtsc();
-        //unsigned int score = (*pScore)(processID, testPublicKey, testMiningSeed, testNonce);
-        unsigned int score = pScore->RunAVX(processID, testPublicKey, testMiningSeed, testNonce);
+        unsigned int scoreVal = (*pScore)(processID, testPublicKey, testMiningSeed, testNonce);
         avgTime += __rdtsc() - startTime;
 
-        if (score != gtScores[testIndex][settingID])
+        if (scoreVal != gtScores[testIndex][settingID])
         {
             setText(loginfo, L" FAILED (");
-            appendNumber(loginfo, score, false);
+            appendNumber(loginfo, scoreVal, false);
             appendText(loginfo, L" vs gt: ");
             appendNumber(loginfo, gtScores[testIndex][settingID], false);
             appendText(loginfo, L" )");
