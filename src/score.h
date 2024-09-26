@@ -270,7 +270,8 @@ struct ScoreFunction
 
     bool initMemory()
     {
-        if (_synapses == nullptr) {
+        //if (_synapses == nullptr)
+        {
             if (!allocatePool(sizeof(synapseStruct) * solutionBufferCount, (void**)&_synapses))
             {
                 logToConsole(L"Failed to allocate memory for score solution buffer!");
@@ -286,7 +287,8 @@ struct ScoreFunction
                 }
             }
         }
-        if (_computeBuffer == nullptr) {
+        //if (_computeBuffer == nullptr)
+        {
             if (!allocatePool(sizeof(computeBuffer) * solutionBufferCount, (void**)&_computeBuffer))
             {
                 logToConsole(L"Failed to allocate memory for score solution buffer!");
@@ -869,8 +871,8 @@ struct ScoreFunction
             {
                 cb.neurons.inputAtTick[1][i] = (char)miningData[i];
             }
-            static constexpr int OFFSET = 32;
-            static constexpr int OFFSET_1 = OFFSET - 1;
+            static constexpr int OFFSET32 = 32;
+            static constexpr int OFFSET32_1 = OFFSET32 - 1;
 
             for (int tick = 1; tick <= maxDuration; tick++)
             {
@@ -888,25 +890,32 @@ struct ScoreFunction
                     char sum = 0;
 
                     bool foundShortCut = false;
-                    long long i = (long long)numberOfNeighborNeurons - OFFSET;
-                    for (; i >= 0 && !foundShortCut; i -= OFFSET)
+                    long long i = (long long)numberOfNeighborNeurons - OFFSET32;
+                    char synapseArray[OFFSET32];
+                    char nnArray[OFFSET32];
+                    char absSynapseArray[OFFSET32];
+
+                    for (; i >= 0 && !foundShortCut; i -= OFFSET32)
                     {
                         char* pNNSynapse = pSynapseInput + i;
                         char* pNNNr = cb.neurons.inputAtTick[tick - 1] + inputNeuronIndex + 1 + i;
                         unsigned long long negMask = 0;
                         unsigned long long nonZerosMask = 0;
+
                         const __m256i neurons256 = _mm256_loadu_si256((const __m256i*)(pNNNr));
                         const __m256i synapses256 = _mm256_loadu_si256((const __m256i*)(pNNSynapse));
                         const __m256i absSynapse = _mm256_abs_epi8(synapses256);
                         const __m256i zeros256 = _mm256_setzero_si256();
                         __m256i nonZeros256 = zeros256;
+                        __m256i nonZerosNeuron256 = zeros256;
                         for (int modIdx = 0; modIdx < numMods; modIdx++)
                         {
                             nonZeros256 = _mm256_or_si256(nonZeros256, _mm256_cmpeq_epi8(absSynapse, _mm256_set1_epi8(_modNum[tick][modIdx])));
                         }
+                        nonZerosMask = (unsigned long long)(~(_mm256_movemask_epi8(_mm256_cmpeq_epi8(neurons256, zeros256))) & _mm256_movemask_epi8(nonZeros256)) & 0xFFFFFFFFUL;
+                        negMask = (unsigned long long)_mm256_movemask_epi8(_mm256_cmpgt_epi8(zeros256, _mm256_and_si256(_mm256_xor_si256(synapses256, neurons256), nonZeros256))) & 0xFFFFFFFFUL;
 
-                        nonZerosMask = (unsigned long long)(~(_mm256_movemask_epi8(_mm256_cmpeq_epi8(neurons256, zeros256))) & _mm256_movemask_epi8(nonZeros256));
-                        negMask = (unsigned long long)_mm256_movemask_epi8(_mm256_cmpgt_epi8(zeros256, _mm256_and_si256(_mm256_xor_si256(synapses256, neurons256), nonZeros256)));
+
                         constexpr unsigned long long markBit = (1ULL << 63);
                         while (nonZerosMask)
                         {
@@ -928,7 +937,7 @@ struct ScoreFunction
 
                     if (!foundShortCut)
                     {
-                        i = numberOfNeighborNeurons & OFFSET_1;
+                        i = numberOfNeighborNeurons & OFFSET32_1;
                         if (i > 0)
                         {
                             for (; i >= 0 && !foundShortCut; i--)

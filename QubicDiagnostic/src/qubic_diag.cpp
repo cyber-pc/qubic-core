@@ -27,9 +27,9 @@
 // Change the number of processors use for testing
 #define NUMBER_TEST_PROCESSORS 16
 
-#define TEST_DURATION 8
-#define TEST_NEURON 256
-#define TEST_NN 256
+#define TEST_DURATION 2048
+#define TEST_NEURON 2048
+#define TEST_NN 2048
 
 #define MAX_NUMBER_TEST_PROCESSORS 256
 typedef struct
@@ -189,7 +189,7 @@ bool RunScoreTest(unsigned long long processID)
 {
     unsigned int testPassed = 0;
     unsigned int totalTests = 0;
-    unsigned int numTest = 1;//sizeof(gtScores) / sizeof(gtScores[0]);
+    unsigned int numTest = sizeof(gtScores) / sizeof(gtScores[0]);
     for( unsigned int testIndex = 0; testIndex < numTest; testIndex++)
     {
         m256i testPublicKey = m256i::zero();
@@ -213,14 +213,14 @@ bool RunScoreTest(unsigned long long processID)
         setText(loginfo, L"Score test ");
         appendNumber(loginfo, testIndex, false);
         appendText(loginfo, L" : ");
-        if (sseScore != avxScore)
+        if (sseScore != avxScore || sseScore!= gtScores[testIndex])
         {
-            appendText(loginfo, L" FAILED (sse: ");
+            appendText(loginfo, L" FAILED (");
             appendNumber(loginfo, sseScore, false);
-            appendText(loginfo, L" vs avx: ");
+            appendText(loginfo, L" vs ");
             appendNumber(loginfo, avxScore, false);
-            //appendText(loginfo, L" vs ");
-            //appendNumber(loginfo, gtScores[testIndex], false);
+            appendText(loginfo, L" vs ");
+            appendNumber(loginfo, gtScores[testIndex], false);
             appendText(loginfo, L" )");
         }
         else
