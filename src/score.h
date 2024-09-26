@@ -270,7 +270,7 @@ struct ScoreFunction
 
     bool initMemory()
     {
-        //if (_synapses == nullptr)
+        if (_synapses == nullptr)
         {
             if (!allocatePool(sizeof(synapseStruct) * solutionBufferCount, (void**)&_synapses))
             {
@@ -287,7 +287,7 @@ struct ScoreFunction
                 }
             }
         }
-        //if (_computeBuffer == nullptr)
+        if (_computeBuffer == nullptr)
         {
             if (!allocatePool(sizeof(computeBuffer) * solutionBufferCount, (void**)&_computeBuffer))
             {

@@ -16,11 +16,13 @@
 #include "../../src/public_settings.h"
 #include "../../src/score.h"
 
+#include "../../test/score_params.h"
+
 #if defined(NDEBUG)
     #define diagLogToConsole(loginfo) logToConsole(loginfo)
     #define diagPrintDebugMessages()
 #else
-    #define diagLogToConsole(loginfo) addDebugMessage(loginfo)
+    #define diagLogToConsole(loginfo) logToConsole(loginfo); addDebugMessage(loginfo)
     #define diagPrintDebugMessages() printDebugMessages()
 #endif
 
@@ -101,17 +103,65 @@ static char gtSamples[][3][65] = {
 {"b8057dc06435a52da037aa6b0cc8aa225eaaf35df702fd55a3c5b7e1854ba484", "d19dd21972d9a0c94c022d919aa6f4eac56198d9f74d79fdc10f873dcb5200de", "6be282581136b5057f68efba9ce8192761a5964fc45be06953ae8311cab57865"},
 {"5905d90d0aa97296d4f7afb08903cd2099dfda1392a32dcb31ae0cc011885e83", "dc1c49b4e9f7f37b9924dc6d950100f9757902792607a94123961aa3edf7ab91", "4b2259498dc9a5bc3c7cdb80d90cbe3fd770cbb36d505ed3766d57fd66a51088"},
 {"a2a682a0150c46484903c8230a9c1e6031d49c480e5a4d1279afa620f7476525", "4379baa2d19f02fda714720dd5499d1bebc3f77819d700367def523c1ecec35f", "99a9e19d1294be153356c4f9a23ab2dd782b7072f91479247397e160da77ef9a"},
+{"3d8ea411bbbe6d7059a2b526c624c83d3c343db76f537c4ab2f9cdcc5675b572", "3431ab5a9fa62e8f4345ff4a125589dabca6e6c7054a55fa7d83b702c0555926", "a0d29fe37d12c1620ff24a14d73d9286ab3dc4a42bc26998e4a4f014d1ee2aa1"},
+{"4e8fe95c3c588c4e2c91200a25b440bd6370666aa7da01463b46380c61687dc1", "16ea6d89ea0eeeaba1bc42b0975f65cb35f0abea32f0ea0f28aba05181a284d6", "d3af183839bbc4796bb7f7caddca8692ed054af06bcf9f537d786fd7595be98f"},
+{"d93555f4d9708d8d5769a9e67538bbb8bc972b13f0c050e1b9ae3e0e7b8b4f48", "c72062a0540da03bd3c0896c6e76bd8d3f30f194a453d5a238b38f581ae599d1", "d5755ed9b7aa87c0f2275d8904b1cbb62406fe83966d86eebac4eb76a86297e3"},
+{"32a31b82aed7bc6bedb3ab19359bdd61581ec14425fd50462f61838cdf638da5", "e950efa0811a7dae3757009b39a3abdc32933e6fedb4d8e0209ab626fe5440d8", "ef3067854218e09f7e852fc39b50a5eb3cf7b29032a783cd05519ca16e04669d"},
+{"7e948db1a7684a32f89a42438ca2c87a47091285bdbfea312aae387d76947892", "b583c78ad5c47d2325f367b35921d343bf9e6de0e44986134f2c7711314a0cd0", "f993e2c24eda4ce2e62ef3741fdc8b3e0fca5a381b3eed4cad930bf9ada7dba6"},
+{"2e162de4cdee20213ebfcf2caf4c04a323de6bce26706ff75d9c10a6558f94c3", "09aa8fcbc2821fab3bf7f0bfb865a71c656500a100b0e12fa9d8bd526b360bbb", "81ea2e1944262bb84ff4be4cb8dd7d55a50e7c3dcc959d0294d22fbe9bec181c"},
+{"faa36a4f7f4a24d6b0b0ed20a84f3f88107d145aced8d0121567ed306a1a5b54", "a4b440a48970f9f6b6e206e6f7ca9f2565797b64fdd6fac9054560c7c0d8011f", "2197aab5575d88589eec41860452b624305c28e3e79441792b310c678c02be3f"},
+{"e760dd45e081d630936cf558aa12df41933bbc2ef5feab212d05e4215410535f", "476886ba5fd8c152ba27a4cd96b3506c21d5960ef5ddbc568b2a99aa10415a6c", "7fb7e252ec4a5fed05add14be6e83e32a91bc1ee249940d6e476d2de8a8de664"},
+{"3e09334a94cf09a1276db79eafe31f635c0b7228133751bfbdec8fef6e627f1a", "15f94a5ef8e903bcc5006c1b4eff4cfa4450862cb3ec7106cc9ba314d3c6434f", "ac69a5759ca9e7c360c1331773f633df73d707f56350a508ae85119806c725fb"},
+{"3a1c7bc599df3ffd675c75a36863c6fd5cb64d9bd0c9b4d4be971a5dc3610bbb", "87216ca3baa3bbe6f865eccd26b5e004ec21cc479e54f206d77042956fe5ee05", "e3a1dcd5e679fb18aa2c24d9a5d61435b27cab8922f623599218d864a20b2246"},
+{"841ec7849705b75df1c7a5f253b047acbcbe7b41c1d3f023870140fa42d1da7e", "4a052601f6268a63a30ef7c8003c7bdf5c3267fe296b7b14bf8b34c18494bcde", "71d4f9d959c5a605bdb28f42558b51fd828424fc0cd2967f9994947e669c0553"},
+{"c19ee36ec9622277e71b372ebea2f71a07a6b394160d44c75eb845f27e248b60", "406d3ae9d2ed39d0a2d7a70e3b5d04d01cdc610a8711971a3a016c469d77e761", "cefc6eb11e83a15480e301258200d2619eafe2de434233064bd5c3d6e2e00dfa"},
+{"7b5afbe57d21dcda54a22da1baae612c78d869bbaf1591f6be115e39b9c704d5", "aae174b0420fcd0bac0db4e3c1b80ccf44c893bd0fb23b7a633c37d68bc16660", "171b332e29d830eeda828e2de0c7c033377203ee68de12ec30f1c114188c7d2d"},
+{"8351f698ce4d8d51bafd60b3d4f65859d9e574340138d2310d4e212715e325c8", "58f276daf479d6003cfd58d8fbea1ca398c8f441f8ac1420a18ee135cb9fe0ac", "6f4961ea5932a4ef0b1949d9575c3e3c1a8a6a584f6ac9ca09e80f871b48299b"},
+{"c849cfa6b1ec4b727101a06f3c822575b4924df54120813cad8bf669c165367e", "08a1d0cbb5de9d5097c06e117ef635c5f8270e3eb7980c9c25fa05d723e9bb2e", "3896216d13bd6ba119f955728370784b3f5502b1bc9886474b1e3bfba1a352d6"},
+{"b9cb313d7852624a4add3ac76bae5d6f51f755fe1c2755407f644127c645a863", "be7edb2465d546372f384491df1cadf8cfb594b4dd37c3a13a94b2fdf628bb6f", "4381fa78fc094a53d6295bfd4cd038efd41b0d4f12ba481523302d9d0966bc37"},
+{"545cbb878e0126261dd69605e10f02e27cc8080d593edc1f5d9a6b7432af85db", "86e169e92c2e42970ec09e017b604fe2bd6728776eb792e5130832502c5e7541", "0a2cb9ada195325b2dcf914bd38c8a8cf1d32763561205377698348b7f01c734"},
+{"3fda0ed9c632857d6e0edd390b7f644f40739e5be9a028f21417a9f44601b0ca", "cf920d57fe3a5f6b5abc28c068c94033db6d45314b3ec8c05c38439d9f07f5d6", "407927dd89cfef4f9343cc2760763e2f7a70eec9dcd563674b1c91bb07a93d42"},
+{"2fe4e34d532bef8c4ba5ecd715fe35d1e195803dd4c6968739391a2c47cd059c", "8b6f647242f84fddc5bb476455895af6506539727d537bcaf16f556862525aba", "ba485348975a9afc1ee5c2edf87c25b8b02cea4f14f1d7b6751ef62bc4c27a6b"},
+{"8e26e98b5da7ab3a69dd52c4e3e1344b584744eb4a03309140ad7311866b1f0a", "ac502f8894c790ad38ee8d4e54fa816ba072d54f8376ef87325d0795532e0956", "7284ce4ecca0ef4be435026f9a4d94e1a37311a1235ed2272f4ce24757b73bf8"},
+{"1a053b9c78f7a7660c6255463b626a807fb47d4af36c6570b4467044495623dd", "335cf0c6f0959112911c889f606956b911ef608b80199284ce6b2c9a9f76473c", "f1b50598e2ca32c6440e6db8aa42f2e585d65e52978fcb11e3660ba4b282bf31"},
+{"cf42c718a7f11d6b0e7e63da48029a82bbe57dc4f1279965462831ac24456aca", "3c082e6e8d68120df35eb7512a7f92c6ee4219bb77b50ff91a1402f0104269e2", "c24506eb048805058bddcd39942f78901b5a511d1185088dbc543f594d80e52a"},
+{"114a7aee8996ea110423cd7ffa024515005035b98e160a6ceaf26782cd625409", "70f1f878cfa0ddfcce0bc21f11cbb5ddb767d1456712687043fb6020f0e9c9f2", "8551e022a73368b63b39e77310218e268499c47aaf1af07962e5f562b39c917c"},
+{"722836fca4ef287c7b70de23240793da04c49854285a3fcb7e9d80752d63a58c", "5958922a179c35522bd603b6674bb6cae9d9ec8d090e7ddbfa98b2e181bf5fb6", "780ff13e9c1775479c944b7f73839b43dd16810ac2604c0893ebf1348220d2bf"},
 };
 
-static unsigned int gtScores[] = {
-82,
-77,
-89,
-82,
-81,
-86,
-75,
-77,
+static unsigned int gtScores[][sizeof(score_params::kSettings) / sizeof(score_params::kSettings[0])] = {
+{91, 86, 86, 81, 82, 72, 87, 67, 96, 89, 68, 82, 88, 86, 88, 92, 82, 93, 86, 94},
+{76, 94, 88, 92, 91, 94, 98, 81, 88, 86, 75, 77, 93, 86, 84, 87, 80, 82, 90, 86},
+{101, 85, 93, 95, 87, 93, 88, 77, 80, 68, 88, 89, 80, 79, 80, 83, 77, 100, 77, 86},
+{86, 81, 83, 83, 97, 81, 97, 85, 81, 98, 77, 82, 80, 87, 79, 91, 78, 71, 82, 97},
+{90, 96, 99, 88, 92, 79, 91, 82, 87, 79, 90, 81, 82, 81, 79, 76, 87, 75, 84, 86},
+{94, 98, 81, 94, 79, 86, 81, 87, 84, 86, 82, 86, 66, 86, 89, 82, 95, 82, 85, 88},
+{95, 77, 80, 75, 82, 87, 80, 83, 84, 88, 85, 75, 85, 90, 86, 82, 78, 72, 75, 83},
+{93, 84, 96, 87, 69, 91, 77, 82, 86, 83, 75, 77, 79, 93, 73, 87, 86, 86, 87, 92},
+{77, 100, 88, 99, 86, 94, 85, 81, 94, 93, 83, 81, 88, 98, 81, 64, 70, 88, 88, 88},
+{85, 76, 80, 81, 98, 87, 96, 86, 104, 68, 94, 92, 74, 68, 91, 98, 89, 89, 83, 88},
+{86, 84, 80, 86, 86, 85, 86, 79, 83, 74, 94, 86, 87, 78, 85, 89, 88, 82, 95, 89},
+{93, 83, 87, 81, 92, 83, 94, 92, 83, 80, 70, 76, 91, 82, 87, 73, 85, 88, 91, 90},
+{80, 85, 87, 82, 86, 90, 87, 83, 88, 85, 96, 87, 92, 99, 77, 81, 91, 93, 88, 91},
+{85, 91, 83, 94, 63, 75, 70, 75, 90, 87, 90, 82, 98, 87, 85, 85, 84, 85, 94, 96},
+{93, 80, 79, 78, 77, 84, 87, 82, 77, 88, 89, 88, 81, 86, 108, 79, 70, 84, 92, 87},
+{93, 85, 73, 83, 86, 78, 89, 89, 87, 90, 82, 100, 91, 76, 95, 86, 89, 82, 78, 83},
+{85, 89, 83, 90, 79, 86, 76, 84, 95, 95, 76, 87, 94, 99, 89, 92, 94, 82, 86, 90},
+{76, 85, 80, 88, 87, 85, 87, 83, 82, 86, 90, 80, 75, 69, 80, 99, 90, 93, 80, 82},
+{90, 83, 72, 81, 78, 83, 79, 71, 96, 90, 96, 82, 80, 64, 97, 104, 84, 92, 83, 81},
+{70, 93, 76, 91, 81, 96, 85, 79, 83, 84, 98, 82, 82, 88, 95, 91, 86, 75, 84, 102},
+{87, 82, 90, 83, 81, 88, 79, 91, 91, 92, 85, 81, 94, 80, 76, 96, 74, 84, 82, 94},
+{83, 86, 78, 85, 75, 69, 77, 85, 70, 94, 86, 80, 90, 78, 75, 91, 93, 84, 87, 87},
+{90, 82, 92, 82, 83, 86, 79, 94, 86, 77, 83, 85, 77, 85, 73, 93, 93, 87, 84, 80},
+{92, 83, 78, 84, 80, 90, 81, 92, 82, 87, 88, 84, 94, 96, 80, 86, 86, 103, 85, 89},
+{89, 84, 77, 74, 75, 88, 78, 70, 77, 87, 80, 88, 74, 87, 79, 92, 99, 88, 89, 91},
+{80, 62, 89, 63, 81, 87, 85, 84, 78, 79, 97, 87, 94, 86, 110, 81, 79, 80, 82, 95},
+{76, 88, 74, 88, 81, 95, 78, 80, 84, 93, 88, 89, 77, 87, 81, 80, 88, 73, 93, 83},
+{82, 91, 93, 94, 86, 82, 90, 72, 80, 73, 81, 81, 78, 90, 80, 85, 84, 88, 84, 82},
+{94, 93, 80, 88, 83, 87, 82, 96, 83, 97, 79, 94, 89, 90, 77, 88, 87, 94, 97, 68},
+{88, 89, 80, 85, 74, 78, 78, 99, 77, 98, 77, 79, 71, 97, 91, 89, 93, 92, 92, 85},
+{98, 104, 86, 106, 68, 91, 71, 92, 75, 98, 79, 82, 90, 81, 92, 97, 86, 95, 92, 81},
+{96, 81, 86, 84, 85, 79, 91, 92, 89, 75, 111, 90, 77, 83, 85, 100, 91, 97, 81, 79},
 };
 
 static void byteToHex(const unsigned char* byte, char* hex, const int sizeInByte)
@@ -140,6 +190,7 @@ static void hexToByte(const char* hex, unsigned char* byte, const int sizeInByte
     }
 }
 
+
 static bool InitScoreTest()
 {
     // Init score
@@ -155,11 +206,11 @@ static bool InitScoreTest()
 
 static bool InitTest()
 {
-    if (!InitScoreTest())
-    {
-        logToConsole(L"InitTest failed!");
-        return false;
-    }
+    //if (!InitScoreTest())
+    //{
+    //    logToConsole(L"InitTest failed!");
+    //    return false;
+    //}
     return true;
 }
 
@@ -185,12 +236,33 @@ static void deinitialize()
 {
 }
 
-bool RunScoreTest(unsigned long long processID)
+template <unsigned int settingID>
+bool RunScoreSetting(unsigned long long processID)
 {
-    unsigned int testPassed = 0;
-    unsigned int totalTests = 0;
-    unsigned int numTest = sizeof(gtScores) / sizeof(gtScores[0]);
-    for( unsigned int testIndex = 0; testIndex < numTest; testIndex++)
+    unsigned int samplesPassed = 0;
+    unsigned int totalSamples = 0;
+    unsigned long long numSamples = sizeof(gtSamples) / sizeof(gtSamples[0]);
+
+    // Init the score
+    ScoreFunction < DATA_LENGTH,
+                    score_params::kSettings[settingID][score_params::NR_NEURONS],
+                    score_params::kSettings[settingID][score_params::NR_NEIGHBOR_NEURONS],
+                    score_params::kSettings[settingID][score_params::DURATIONS],
+                    NUMBER_TEST_PROCESSORS>* pScore;
+
+    if (!allocatePool(sizeof(ScoreFunction < DATA_LENGTH,
+        score_params::kSettings[settingID][score_params::NR_NEURONS],
+        score_params::kSettings[settingID][score_params::NR_NEIGHBOR_NEURONS],
+        score_params::kSettings[settingID][score_params::DURATIONS],
+        NUMBER_TEST_PROCESSORS>), (void**)&pScore))
+    {
+        logToConsole(L"Allocate score failed!");
+        return false;
+    }
+    pScore->initMemory();
+
+    // Running all samples here
+    for (unsigned long long testIndex = 0; testIndex < numSamples; testIndex++)
     {
         m256i testPublicKey = m256i::zero();
         m256i testMiningSeed = m256i::zero();
@@ -200,37 +272,150 @@ bool RunScoreTest(unsigned long long processID)
         hexToByte(gtSamples[testIndex][1], testPublicKey.m256i_u8, 32);
         hexToByte(gtSamples[testIndex][2], testNonce.m256i_u8, 32);
 
-
         // Init mining data
-        gpScore->initMiningData(testMiningSeed);
+        pScore->initMiningData(testMiningSeed);
 
         // Run SSE
-        unsigned int sseScore = gpScore->RunSSE(processID, testPublicKey, testMiningSeed, testNonce);
+        unsigned int sseScore = pScore->RunSSE(processID, testPublicKey, testMiningSeed, testNonce);
 
         // Run SSE
-        unsigned int avxScore = gpScore->RunAVX(processID, testPublicKey, testMiningSeed, testNonce);
+        unsigned int avxScore = pScore->RunAVX(processID, testPublicKey, testMiningSeed, testNonce);
 
-        setText(loginfo, L"Score test ");
-        appendNumber(loginfo, testIndex, false);
-        appendText(loginfo, L" : ");
-        if (sseScore != avxScore || sseScore!= gtScores[testIndex])
+        if (sseScore != avxScore || sseScore != gtScores[testIndex][settingID])
         {
-            appendText(loginfo, L" FAILED (");
+            setText(loginfo, L" FAILED (");
             appendNumber(loginfo, sseScore, false);
             appendText(loginfo, L" vs ");
             appendNumber(loginfo, avxScore, false);
             appendText(loginfo, L" vs ");
-            appendNumber(loginfo, gtScores[testIndex], false);
+            appendNumber(loginfo, gtScores[testIndex][settingID], false);
             appendText(loginfo, L" )");
+            diagLogToConsole(loginfo);
+            logToConsole(loginfo);
         }
         else
         {
-            testPassed++;
-            appendText(loginfo, L" PASSED ");
+            samplesPassed++;
         }
 
-        diagLogToConsole(loginfo);
+        totalSamples++;
+    }
+
+    // Clean up
+    pScore->freeMemory();
+
+    // Deallocated
+    freePool(pScore);
+
+    return (totalSamples == samplesPassed);
+
+}
+
+bool RunScoreTest(unsigned long long processID)
+{
+    unsigned int testPassed = 0;
+    unsigned int totalTests = 0;
+    unsigned int numSettings = sizeof(gtScores[0]) / sizeof(gtScores[0][0]);
+    unsigned int numSamples = sizeof(gtSamples) / sizeof(gtSamples[0]);
+
+    setText(loginfo, L"Running score test with ");
+    appendNumber(loginfo, numSettings, false);
+    appendText(loginfo, L" setting on ");
+    appendNumber(loginfo, numSamples, false);
+    appendText(loginfo, L" samples.");
+
+    // Run per settings
+    for (unsigned int setting = 0; setting < numSettings; setting++)
+    {
+        setText(loginfo, L"Test ");
+        appendNumber(loginfo, setting, false);
+        appendText(loginfo, L" / ");
+        appendNumber(loginfo, numSettings, false);
+        appendText(loginfo, L": NEURONS:");
+        appendNumber(loginfo, score_params::kSettings[setting][score_params::NR_NEURONS], false);
+        appendText(loginfo, L", NN: ");
+        appendNumber(loginfo, score_params::kSettings[setting][score_params::NR_NEIGHBOR_NEURONS], false);
+        appendText(loginfo, L", DUR: ");
+        appendNumber(loginfo, score_params::kSettings[setting][score_params::DURATIONS], false);
+
+        bool sts = false;
+        switch (setting)
+        {
+        case 0:
+            sts = RunScoreSetting<0>(processID);
+            break;
+        case 1:
+            sts = RunScoreSetting<1>(processID);
+            break;
+        case 2:
+            sts = RunScoreSetting<2>(processID);
+            break;
+        case 3:
+            sts = RunScoreSetting<3>(processID);
+            break;
+        case 4:
+            sts = RunScoreSetting<4>(processID);
+            break;
+        case 5:
+            sts = RunScoreSetting<5>(processID);
+            break;
+        case 6:
+            sts = RunScoreSetting<6>(processID);
+            break;
+        case 7:
+            sts = RunScoreSetting<7>(processID);
+            break;
+        case 8:
+            sts = RunScoreSetting<8>(processID);
+            break;
+        case 9:
+            sts = RunScoreSetting<9>(processID);
+            break;
+        case 10:
+            sts = RunScoreSetting<10>(processID);
+            break;
+        case 11:
+            sts = RunScoreSetting<11>(processID);
+            break;
+        case 12:
+            sts = RunScoreSetting<12>(processID);
+            break;
+        case 13:
+            sts = RunScoreSetting<13>(processID);
+            break;
+        case 14:
+            sts = RunScoreSetting<14>(processID);
+            break;
+        case 15:
+            sts = RunScoreSetting<15>(processID);
+            break;
+        case 16:
+            sts = RunScoreSetting<16>(processID);
+            break;
+        case 17:
+            sts = RunScoreSetting<17>(processID);
+            break;
+        case 18:
+            sts = RunScoreSetting<18>(processID);
+            break;
+        case 19:
+            sts = RunScoreSetting<19>(processID);
+            break;
+        default:
+            diagLogToConsole(L"Unknown score setting!");
+            break;
+        }
+        if (sts)
+        {
+            appendText(loginfo, L"    PASSED");
+            testPassed++;
+        }
+        else
+        {
+            appendText(loginfo, L"    FAILED");
+        }
         totalTests++;
+        diagLogToConsole(loginfo);
     }
 
     setText(loginfo, L"Score result: PASS ");
