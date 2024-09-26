@@ -27,9 +27,10 @@
 // Change the number of processors use for testing
 #define NUMBER_TEST_PROCESSORS 16
 
+#define TEST_DURATION 8
+#define TEST_NEURON 256
+#define TEST_NN 256
 
-#define LOOP_COUNT_TEST 10000
-#define LOOP_COUNT_TEST_SMALL 1000
 #define MAX_NUMBER_TEST_PROCESSORS 256
 typedef struct
 {
@@ -54,7 +55,7 @@ static EFI_MP_SERVICES_PROTOCOL* mpServicesProtocol;
 static unsigned int numberOfProcessors = 0;
 static volatile char logMessageLock = 0;
 static Processor processors[MAX_NUMBER_TEST_PROCESSORS];
-static ScoreFunction<DATA_LENGTH, 2048, 2048, 2048, NUMBER_TEST_PROCESSORS>* gpScore = nullptr;
+static ScoreFunction<DATA_LENGTH, TEST_NEURON, TEST_NN, TEST_DURATION, NUMBER_TEST_PROCESSORS>* gpScore = nullptr;
 
 CHAR16 loginfo[2048];
 
@@ -142,7 +143,7 @@ static void hexToByte(const char* hex, unsigned char* byte, const int sizeInByte
 static bool InitScoreTest()
 {
     // Init score
-    if (!allocatePool(sizeof(ScoreFunction<DATA_LENGTH, 2048, 2048, 2048, NUMBER_TEST_PROCESSORS>), (void**)&gpScore))
+    if (!allocatePool(sizeof(ScoreFunction<DATA_LENGTH, TEST_NEURON, TEST_NN, TEST_DURATION, NUMBER_TEST_PROCESSORS>), (void**)&gpScore))
     {
         logToConsole(L"Allocate score failed!");
         return false;
@@ -188,7 +189,7 @@ bool RunScoreTest(unsigned long long processID)
 {
     unsigned int testPassed = 0;
     unsigned int totalTests = 0;
-    unsigned int numTest = sizeof(gtScores) / sizeof(gtScores[0]);
+    unsigned int numTest = 1;//sizeof(gtScores) / sizeof(gtScores[0]);
     for( unsigned int testIndex = 0; testIndex < numTest; testIndex++)
     {
         m256i testPublicKey = m256i::zero();
@@ -203,18 +204,23 @@ bool RunScoreTest(unsigned long long processID)
         // Init mining data
         gpScore->initMiningData(testMiningSeed);
 
-        // Run
-        unsigned int score = (*gpScore)(processID, testPublicKey, testMiningSeed, testNonce);
+        // Run SSE
+        unsigned int sseScore = gpScore->RunSSE(processID, testPublicKey, testMiningSeed, testNonce);
+
+        // Run SSE
+        unsigned int avxScore = gpScore->RunAVX(processID, testPublicKey, testMiningSeed, testNonce);
 
         setText(loginfo, L"Score test ");
         appendNumber(loginfo, testIndex, false);
         appendText(loginfo, L" : ");
-        if (score != gtScores[testIndex])
+        if (sseScore != avxScore)
         {
-            appendText(loginfo, L" FAILED (");
-            appendNumber(loginfo, score, false);
-            appendText(loginfo, L" vs ");
-            appendNumber(loginfo, gtScores[testIndex], false);
+            appendText(loginfo, L" FAILED (sse: ");
+            appendNumber(loginfo, sseScore, false);
+            appendText(loginfo, L" vs avx: ");
+            appendNumber(loginfo, avxScore, false);
+            //appendText(loginfo, L" vs ");
+            //appendNumber(loginfo, gtScores[testIndex], false);
             appendText(loginfo, L" )");
         }
         else

@@ -6,7 +6,7 @@
 
 // Compiler flag to determine AVX512 or generic implementation of K12
 
-#define GENERIC_K12 1
+#define GENERIC_K12 0
 
 
 ////////// KangarooTwelve \\\\\\\\\\
