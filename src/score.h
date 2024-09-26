@@ -891,10 +891,6 @@ struct ScoreFunction
 
                     bool foundShortCut = false;
                     long long i = (long long)numberOfNeighborNeurons - OFFSET32;
-                    char synapseArray[OFFSET32];
-                    char nnArray[OFFSET32];
-                    char absSynapseArray[OFFSET32];
-
                     for (; i >= 0 && !foundShortCut; i -= OFFSET32)
                     {
                         char* pNNSynapse = pSynapseInput + i;

@@ -218,6 +218,8 @@ static bool initialize()
 {
     enableAVX();
 
+    initTimeStampCounter();
+
 #if defined (__AVX512F__) && !GENERIC_K12
     initAVX512KangarooTwelveConstants();
 #endif
@@ -261,6 +263,8 @@ bool RunScoreSetting(unsigned long long processID)
     }
     pScore->initMemory();
 
+    unsigned long long avgTime = 0;
+
     // Running all samples here
     for (unsigned long long testIndex = 0; testIndex < numSamples; testIndex++)
     {
@@ -275,23 +279,20 @@ bool RunScoreSetting(unsigned long long processID)
         // Init mining data
         pScore->initMiningData(testMiningSeed);
 
-        // Run SSE
-        unsigned int sseScore = pScore->RunSSE(processID, testPublicKey, testMiningSeed, testNonce);
+        // Run score computation
+        unsigned long long startTime = __rdtsc();
+        //unsigned int score = (*pScore)(processID, testPublicKey, testMiningSeed, testNonce);
+        unsigned int score = pScore->RunAVX(processID, testPublicKey, testMiningSeed, testNonce);
+        avgTime += __rdtsc() - startTime;
 
-        // Run SSE
-        unsigned int avxScore = pScore->RunAVX(processID, testPublicKey, testMiningSeed, testNonce);
-
-        if (sseScore != avxScore || sseScore != gtScores[testIndex][settingID])
+        if (score != gtScores[testIndex][settingID])
         {
             setText(loginfo, L" FAILED (");
-            appendNumber(loginfo, sseScore, false);
-            appendText(loginfo, L" vs ");
-            appendNumber(loginfo, avxScore, false);
-            appendText(loginfo, L" vs ");
+            appendNumber(loginfo, score, false);
+            appendText(loginfo, L" vs gt: ");
             appendNumber(loginfo, gtScores[testIndex][settingID], false);
             appendText(loginfo, L" )");
             diagLogToConsole(loginfo);
-            logToConsole(loginfo);
         }
         else
         {
@@ -300,6 +301,14 @@ bool RunScoreSetting(unsigned long long processID)
 
         totalSamples++;
     }
+
+    avgTime = avgTime * 1000 / frequency;
+    avgTime = avgTime / numSamples;
+
+    setText(loginfo, L"        AvgTime: ");
+    appendNumber(loginfo, avgTime, false);
+    appendText(loginfo, L" ms");
+    diagLogToConsole(loginfo);
 
     // Clean up
     pScore->freeMemory();
@@ -328,7 +337,7 @@ bool RunScoreTest(unsigned long long processID)
     for (unsigned int setting = 0; setting < numSettings; setting++)
     {
         setText(loginfo, L"Test ");
-        appendNumber(loginfo, setting, false);
+        appendNumber(loginfo, setting + 1, false);
         appendText(loginfo, L" / ");
         appendNumber(loginfo, numSettings, false);
         appendText(loginfo, L": NEURONS:");
@@ -337,6 +346,7 @@ bool RunScoreTest(unsigned long long processID)
         appendNumber(loginfo, score_params::kSettings[setting][score_params::NR_NEIGHBOR_NEURONS], false);
         appendText(loginfo, L", DUR: ");
         appendNumber(loginfo, score_params::kSettings[setting][score_params::DURATIONS], false);
+        diagLogToConsole(loginfo);
 
         bool sts = false;
         switch (setting)
@@ -407,12 +417,12 @@ bool RunScoreTest(unsigned long long processID)
         }
         if (sts)
         {
-            appendText(loginfo, L"    PASSED");
+            setText(loginfo, L"    PASSED");
             testPassed++;
         }
         else
         {
-            appendText(loginfo, L"    FAILED");
+            setText(loginfo, L"    FAILED");
         }
         totalTests++;
         diagLogToConsole(loginfo);
