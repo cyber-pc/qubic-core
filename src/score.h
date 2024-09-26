@@ -1072,9 +1072,8 @@ struct ScoreFunction
                         {
                             nonZeros256 = _mm256_or_si256(nonZeros256, _mm256_cmpeq_epi8(absSynapse, _mm256_set1_epi8(_modNum[tick][modIdx])));
                         }
-
-                        nonZerosMask = (unsigned long long)(~(_mm256_movemask_epi8(_mm256_cmpeq_epi8(neurons256, zeros256))) & _mm256_movemask_epi8(nonZeros256));
-                        negMask = (unsigned long long)_mm256_movemask_epi8(_mm256_cmpgt_epi8(zeros256, _mm256_and_si256(_mm256_xor_si256(synapses256, neurons256), nonZeros256)));
+                        nonZerosMask = (unsigned long long)(~(_mm256_movemask_epi8(_mm256_cmpeq_epi8(neurons256, zeros256))) & _mm256_movemask_epi8(nonZeros256)) & 0xFFFFFFFFUL;
+                        negMask = (unsigned long long)_mm256_movemask_epi8(_mm256_cmpgt_epi8(zeros256, _mm256_and_si256(_mm256_xor_si256(synapses256, neurons256), nonZeros256))) & 0xFFFFFFFFUL;
 #else
                         const __m128i neurons128 = _mm_loadu_si128((const __m128i*)(pNNNr));
                         const __m128i synapses128 = _mm_loadu_si128((const __m128i*)(pNNSynapse));
