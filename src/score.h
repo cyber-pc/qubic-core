@@ -29,6 +29,14 @@ struct ScoreFunction
     static constexpr unsigned long long priorSynapsesLength = 0;//numberOfNeighborNeurons > 3200 ? 3200 : numberOfNeighborNeurons / 2;
     static constexpr unsigned long long priorSynapsesOffset = numberOfNeighborNeurons - priorSynapsesLength;
     static constexpr unsigned int numberOfCheckPoints = 2;
+
+#if defined (__AVX512F__)
+    static constexpr int OFFSET = 64;
+#else
+    static constexpr int OFFSET = 32;
+#endif
+    static constexpr int OFFSET_1 = OFFSET - 1;
+
     /* 
     DURATION 65536 | MAX_NUM_MODS 48
     DURATION 32768 | MAX_NUM_MODS 44
@@ -984,6 +992,37 @@ struct ScoreFunction
         return score;
     }
 
+    void computeMask(const char* pNNNr, const char* pNNSynapse, unsigned long long& nonZeroMask, unsigned long long& negMask)
+    {
+
+#if defined (__AVX512F__)
+        const __m512i neurons512 = _mm512_loadu_si512((const __m512i*)(pNNNr));
+        const __m512i synapses512 = _mm512_loadu_si512((const __m512i*)(pNNSynapse));
+        const __m512i absSynapse = _mm512_abs_epi8(synapses512);
+        const __m512i zeros512 = _mm512_setzero_si512();
+        unsigned long long nonZeros512 = 0;
+        for (int modIdx = 0; modIdx < numMods; modIdx++)
+        {
+            nonZeros512 |= _mm512_cmpeq_epi8_mask(absSynapse, _mm512_set1_epi8(_modNum[tick][modIdx]));
+        }
+        nonZerosMask = (unsigned long long)(~(_mm512_cmpeq_epi8_mask(neurons512, zeros512)) & nonZeros512);
+        negMask = (unsigned long long)_mm512_cmpgt_epi8_mask(zeros512, _mm512_xor_si512(synapses512, neurons512));
+#else
+        const __m256i neurons256 = _mm256_loadu_si256((const __m256i*)(pNNNr));
+        const __m256i synapses256 = _mm256_loadu_si256((const __m256i*)(pNNSynapse));
+        const __m256i absSynapse = _mm256_abs_epi8(synapses256);
+        const __m256i zeros256 = _mm256_setzero_si256();
+        __m256i nonZeros256 = zeros256;
+        for (int modIdx = 0; modIdx < numMods; modIdx++)
+        {
+            nonZeros256 = _mm256_or_si256(nonZeros256, _mm256_cmpeq_epi8(absSynapse, _mm256_set1_epi8(_modNum[tick][modIdx])));
+        }
+        nonZerosMask = (unsigned long long)(~(_mm256_movemask_epi8(_mm256_cmpeq_epi8(neurons256, zeros256))) & _mm256_movemask_epi8(nonZeros256)) & 0xFFFFFFFFUL;
+        negMask = (unsigned long long)_mm256_movemask_epi8(_mm256_cmpgt_epi8(zeros256, _mm256_and_si256(_mm256_xor_si256(synapses256, neurons256), nonZeros256))) & 0xFFFFFFFFUL;
+#endif
+
+    }
+
     // main score function
     unsigned int operator()(const unsigned long long processor_Number, const m256i& publicKey, const m256i& miningSeed, const m256i& nonce)
     {
@@ -1032,13 +1071,6 @@ struct ScoreFunction
             {
                 cb.neurons.inputAtTick[1][i] = (char)miningData[i];
             }
-#if defined (__AVX512F__)
-            static constexpr int OFFSET = 64;
-#else
-            static constexpr int OFFSET = 32;
-#endif
-            static constexpr int OFFSET_1 = OFFSET - 1;
-
             for (int tick = 1; tick < maxDuration; tick++)
             {
                 copyMem(cb.neurons.inputAtTick[tick - 1] + allParamsCount, cb.neurons.inputAtTick[tick - 1], numberOfNeighborNeurons);
@@ -1063,31 +1095,8 @@ struct ScoreFunction
                         unsigned long long negMask = 0;
                         unsigned long long nonZerosMask = 0;
 
-#if defined (__AVX512F__)
-                        const __m512i neurons512 = _mm512_loadu_si512((const __m512i*)(pNNNr));
-                        const __m512i synapses512 = _mm512_loadu_si512((const __m512i*)(pNNSynapse));
-                        const __m512i absSynapse = _mm512_abs_epi8(synapses512);
-                        const __m512i zeros512 = _mm512_setzero_si512();
-                        unsigned long long nonZeros512 = 0;
-                        for (int modIdx = 0; modIdx < numMods; modIdx++)
-                        {
-                            nonZeros512 |=  _mm512_cmpeq_epi8_mask(absSynapse, _mm512_set1_epi8(_modNum[tick][modIdx]));
-                        }
-                        nonZerosMask = (unsigned long long)(~(_mm512_cmpeq_epi8_mask(neurons512, zeros512)) & nonZeros512);
-                        negMask = (unsigned long long)_mm512_cmpgt_epi8_mask(zeros512, _mm512_xor_si512(synapses512, neurons512));
-#else
-                        const __m256i neurons256 = _mm256_loadu_si256((const __m256i*)(pNNNr));
-                        const __m256i synapses256 = _mm256_loadu_si256((const __m256i*)(pNNSynapse));
-                        const __m256i absSynapse = _mm256_abs_epi8(synapses256);
-                        const __m256i zeros256 = _mm256_setzero_si256();
-                        __m256i nonZeros256 = zeros256;
-                        for (int modIdx = 0; modIdx < numMods; modIdx++)
-                        {
-                            nonZeros256 = _mm256_or_si256(nonZeros256, _mm256_cmpeq_epi8(absSynapse, _mm256_set1_epi8(_modNum[tick][modIdx])));
-                        }
-                        nonZerosMask = (unsigned long long)(~(_mm256_movemask_epi8(_mm256_cmpeq_epi8(neurons256, zeros256))) & _mm256_movemask_epi8(nonZeros256)) & 0xFFFFFFFFUL;
-                        negMask = (unsigned long long)_mm256_movemask_epi8(_mm256_cmpgt_epi8(zeros256, _mm256_and_si256(_mm256_xor_si256(synapses256, neurons256), nonZeros256))) & 0xFFFFFFFFUL;
-#endif
+                        computeMask(pNNNr,  pNNSynapse, nonZeroMask, negMask);
+
                         constexpr unsigned long long markBit = (1ULL << 63);
                         while (nonZerosMask)
                         {

@@ -37,6 +37,7 @@ static const std::string COMMON_TEST_SAMPLES_FILE_NAME = "data/samples_20240815.
 static const std::string COMMON_TEST_SCORES_FILE_NAME = "data/scores_random2.csv";
 static constexpr unsigned long long COMMON_TEST_NUMBER_OF_SAMPLES = 32; // set to 0 for run all available samples
 static constexpr bool PRINT_DETAILED_INFO = false;
+static bool gCompareReference = false;
 
 // Only run on specific index of samples and setting
 std::vector<unsigned int> filteredSamples;// = { 0 };
@@ -66,6 +67,12 @@ static void processElement(unsigned char* miningSeed, unsigned char* publicKey, 
     auto t1 = std::chrono::high_resolution_clock::now();
     auto d = t1 - t0;
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(d).count();
+
+    // Run reference score
+    unsigned int refScore = 0;
+    if (compareReference)
+    {
+    }
 
 #pragma omp critical
     {
@@ -126,12 +133,13 @@ static void process(unsigned char* miningSeed, unsigned char* publicKey, unsigne
     processHelper<N>(miningSeed, publicKey, nonce, sampleIndex, std::make_index_sequence<N>{});
 }
 
-void runCommonTests()
+void runCommonTests(bool compareReference)
 {
 #ifdef __AVX512F__
     initAVX512KangarooTwelveConstants();
 #endif
     constexpr unsigned long long numberOfGeneratedSetting = sizeof(score_params::kSettings) / sizeof(score_params::kSettings[0]);
+    gCompareReference = compareReference;
 
     // Read the parameters and results
     auto sampleString = readCSV(COMMON_TEST_SAMPLES_FILE_NAME);
@@ -270,5 +278,5 @@ void runCommonTests()
 
 TEST(TestQubicScoreFunction, CommonTests)
 {
-    runCommonTests();
+    runCommonTests(true);
 }
