@@ -992,8 +992,12 @@ struct ScoreFunction
         return score;
     }
 
-    void computeMask(const char* pNNNr, const char* pNNSynapse, unsigned long long& nonZeroMask, unsigned long long& negMask)
+    void computeMask(const char* pNNNr, const char* pNNSynapse, int tick, unsigned long long& nonZerosMask, unsigned long long& negMask)
     {
+
+        negMask = 0;
+        nonZerosMask = 0;
+        int numMods = _totalModNum[tick];
 
 #if defined (__AVX512F__)
         const __m512i neurons512 = _mm512_loadu_si512((const __m512i*)(pNNNr));
@@ -1007,7 +1011,7 @@ struct ScoreFunction
         }
         nonZerosMask = (unsigned long long)(~(_mm512_cmpeq_epi8_mask(neurons512, zeros512)) & nonZeros512);
         negMask = (unsigned long long)_mm512_cmpgt_epi8_mask(zeros512, _mm512_xor_si512(synapses512, neurons512));
-#else
+#elif defined(__AVX2__)
         const __m256i neurons256 = _mm256_loadu_si256((const __m256i*)(pNNNr));
         const __m256i synapses256 = _mm256_loadu_si256((const __m256i*)(pNNSynapse));
         const __m256i absSynapse = _mm256_abs_epi8(synapses256);
@@ -1019,27 +1023,29 @@ struct ScoreFunction
         }
         nonZerosMask = (unsigned long long)(~(_mm256_movemask_epi8(_mm256_cmpeq_epi8(neurons256, zeros256))) & _mm256_movemask_epi8(nonZeros256)) & 0xFFFFFFFFUL;
         negMask = (unsigned long long)_mm256_movemask_epi8(_mm256_cmpgt_epi8(zeros256, _mm256_and_si256(_mm256_xor_si256(synapses256, neurons256), nonZeros256))) & 0xFFFFFFFFUL;
+#else
+        const __m128i neurons128 = _mm_loadu_si128((const __m128i*)(pNNNr));
+        const __m128i synapses128 = _mm_loadu_si128((const __m128i*)(pNNSynapse));
+        const __m128i absSynapse = _mm_abs_epi8(synapses128);
+        const __m128i zeros128 = _mm_setzero_si128();
+        __m128i nonZeros128 = zeros128;
+        for (int modIdx = 0; modIdx < numMods; modIdx++)
+        {
+            nonZeros128 = _mm_or_si128(nonZeros128, _mm_cmpeq_epi8(absSynapse, _mm_set1_epi8(_modNum[tick][modIdx])));
+        }
+
+        nonZerosMask = (unsigned long long)(~(_mm_movemask_epi8(_mm_cmpeq_epi8(neurons128, zeros128))) & _mm_movemask_epi8(nonZeros128));
+        negMask = (unsigned long long)_mm_movemask_epi8(_mm_cmpgt_epi8(zeros128, _mm_and_si128(_mm_xor_si128(synapses128, neurons128), nonZeros128)));
 #endif
 
     }
 
-    // main score function
-    unsigned int operator()(const unsigned long long processor_Number, const m256i& publicKey, const m256i& miningSeed, const m256i& nonce)
+    // Compute score
+    unsigned int computeScore(const unsigned long long processor_Number, const m256i& publicKey, const m256i& miningSeed, const m256i& nonce)
     {
-        int score = 0;
-#if USE_SCORE_CACHE
-        unsigned int scoreCacheIndex = scoreCache.getCacheIndex(publicKey, miningSeed, nonce);
-        score = scoreCache.tryFetching(publicKey, miningSeed, nonce, scoreCacheIndex);
-        if (score >= scoreCache.MIN_VALID_SCORE)
-        {
-            return score;
-        }
-        score = 0;
-#endif
-
         const int solutionBufIdx = (int)(processor_Number % solutionBufferCount);
-        ACQUIRE(solutionEngineLock[solutionBufIdx]);
 
+        unsigned int score = 0;
         auto& synapses = _synapses[solutionBufIdx];
         auto& cb = _computeBuffer[solutionBufIdx];
 
@@ -1051,18 +1057,11 @@ struct ScoreFunction
 
         // ComputeInput
         {
-            for (unsigned long long idx = 0; idx < inNeuronsCount; idx++)
-            {
-                setMem(cb.synapseBucketPos[idx], sizeof(cb.synapseBucketPos[idx]), 0);
-                cacheBucketIndices(cb.inputLength, cb, idx, 0, numberOfNeighborNeurons - 1);
-                cb.isGeneratedBucketOffset[idx] = false;
-                cb.isGeneratedSynapseFull[idx] = true;
-            }
-
             setMem(cb.neurons.inputAtTick, sizeof(cb.neurons.inputAtTick), NOT_CALCULATED);
 
             setMem(cb.neurons.inputAtTick[0], allParamsCount + numberOfNeighborNeurons, 0);
-            for (int i = 0; i < dataLength; i++) {
+            for (int i = 0; i < dataLength; i++)
+            {
                 cb.neurons.inputAtTick[0][i] = (char)miningData[i];
             }
             copyMem(cb.neurons.inputAtTick[0] + allParamsCount, cb.neurons.inputAtTick[0], numberOfNeighborNeurons);
@@ -1071,7 +1070,8 @@ struct ScoreFunction
             {
                 cb.neurons.inputAtTick[1][i] = (char)miningData[i];
             }
-            for (int tick = 1; tick < maxDuration; tick++)
+
+            for (int tick = 1; tick <= maxDuration; tick++)
             {
                 copyMem(cb.neurons.inputAtTick[tick - 1] + allParamsCount, cb.neurons.inputAtTick[tick - 1], numberOfNeighborNeurons);
                 for (int i = 0; i < dataLength; i++)
@@ -1080,7 +1080,6 @@ struct ScoreFunction
                 }
 
                 char* pSynapseInput = synapses.inputLength;
-                const int numMods = _totalModNum[tick];
                 for (unsigned int inputNeuronIndex = 0; inputNeuronIndex < inNeuronsCount; inputNeuronIndex++, pSynapseInput += numberOfNeighborNeurons)
                 {
                     char prev = 2;
@@ -1095,7 +1094,7 @@ struct ScoreFunction
                         unsigned long long negMask = 0;
                         unsigned long long nonZerosMask = 0;
 
-                        computeMask(pNNNr,  pNNSynapse, nonZeroMask, negMask);
+                        computeMask(pNNNr, pNNSynapse, tick, nonZerosMask, negMask);
 
                         constexpr unsigned long long markBit = (1ULL << 63);
                         while (nonZerosMask)
@@ -1107,40 +1106,31 @@ struct ScoreFunction
                                 foundShortCut = true;
                                 break;
                             }
-                            else
-                            {
-                                sum += nnV;
-                                prev = nnV;
-                            }
+                            sum += nnV;
+                            prev = nnV;
                             nonZerosMask ^= maskBit;
                         }
                     }
 
                     if (!foundShortCut)
                     {
-                        i = numberOfNeighborNeurons & OFFSET_1;
-                        if (i > 0)
+                        unsigned int remainData = numberOfNeighborNeurons & OFFSET_1;
+                        for (int k = remainData - 1; k >= 0; k--)
                         {
-                            for (; i >= 0 && !foundShortCut; i--)
+                            char s = pSynapseInput[k];
+                            if (s == 0 || s == -128) continue;
+                            if (tick % s != 0) continue;
+                            char nn = cb.neurons.inputAtTick[tick - 1][inputNeuronIndex + 1 + k];
+                            if (!nn) continue;
+                            char product = nn;
+                            if (s < 0) product = -product;
+                            if (product == prev)
                             {
-                                char s = pSynapseInput[i];
-                                char absS = _tickDiviable[tick][(unsigned char)abs(s)];
-                                if (absS)
-                                {
-                                    unsigned long long anotherInputNeuronIndex = inputNeuronIndex + 1 + i;
-                                    char nnV = cb.neurons.inputAtTick[tick-1][anotherInputNeuronIndex];
-                                    if (!nnV)
-                                        continue;
-                                    nnV = s > 0 ? nnV : -nnV;
-                                    if (nnV == prev)
-                                    {
-                                        foundShortCut = true;
-                                        break;
-                                    }
-                                    sum += nnV;
-                                    prev = nnV;
-                                }
+                                foundShortCut = true;
+                                break;
                             }
+                            prev = product;
+                            sum += prev;
                         }
                     }
 
@@ -1158,18 +1148,40 @@ struct ScoreFunction
             }
         }
 
-        {
-            for (unsigned int inputNeuronIndex = numberOfHiddenNeurons; inputNeuronIndex < numberOfHiddenNeurons + dataLength; inputNeuronIndex++) {
-                cb.neurons.inputAtTick[maxDuration][dataLength + inputNeuronIndex] = solveNeuron<dataLength, true>(cb, maxDuration, dataLength + inputNeuronIndex);
-            }
-        }
-
         score = 0;
-        for (unsigned int i = 0; i < dataLength; i++) {
-            if (miningData[i] == cb.neurons.inputAtTick[maxDuration][dataLength + numberOfHiddenNeurons + i]) {
+        for (unsigned int i = 0; i < dataLength; i++)
+        {
+            if (miningData[i] == cb.neurons.inputAtTick[maxDuration][dataLength + numberOfHiddenNeurons + i])
+            {
                 score++;
             }
         }
+        return score;
+    }
+
+    // main score function
+    unsigned int operator()(const unsigned long long processor_Number, const m256i& publicKey, const m256i& miningSeed, const m256i& nonce)
+    {
+        if (isZero(miningSeed) || miningSeed != currentRandomSeed)
+        {
+            return DATA_LENGTH + 1; // return invalid score
+        }
+
+        int score = 0;
+#if USE_SCORE_CACHE
+        unsigned int scoreCacheIndex = scoreCache.getCacheIndex(publicKey, miningSeed, nonce);
+        score = scoreCache.tryFetching(publicKey, miningSeed, nonce, scoreCacheIndex);
+        if (score >= scoreCache.MIN_VALID_SCORE)
+        {
+            return score;
+        }
+        score = 0;
+#endif
+
+        const int solutionBufIdx = (int)(processor_Number % solutionBufferCount);
+        ACQUIRE(solutionEngineLock[solutionBufIdx]);
+
+        score = computeScore(processor_Number, publicKey, miningSeed, nonce);
 
         RELEASE(solutionEngineLock[solutionBufIdx]);
 #if USE_SCORE_CACHE
