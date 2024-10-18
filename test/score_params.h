@@ -14,7 +14,7 @@ static constexpr unsigned long long kDataLength = 256;
 
 // Comment out when we want to reduce the number of running test
 static constexpr unsigned long long kSettings[][MAX_PARAM_TYPE] = {
-        {512, 512, 5288ULL},
+    {512, 512, 5288ULL},
     {512, 256, 20972ULL},
     {512, 512, 20152ULL},
 
@@ -35,7 +35,6 @@ static constexpr unsigned long long kSettings[][MAX_PARAM_TYPE] = {
     {7192, 6475, 17517712ULL},
     {7192, 5184, 32472324ULL},
     {12088, 7864, 22188546ULL},
-    {8192, 4096, 8192},
-    {8192, 8192, 8192},
+    {24000, 10000, 5000000ULL}
 };
 }

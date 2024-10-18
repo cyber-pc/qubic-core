@@ -70,9 +70,7 @@ static void processElement(unsigned char* miningSeed, unsigned char* publicKey, 
 
     // Run reference score
     unsigned int refScore = 0;
-    if (compareReference)
-    {
-    }
+
 
 #pragma omp critical
     {
