@@ -2,63 +2,112 @@
 #include "../../src/platform/uefi.h"
 
 
+static volatile char logMessageLock = 0;
+
 #include "../../src/platform/time.h"
+#include "../../src/platform/file_io.h"
 #include "../../src/platform/time_stamp_counter.h"
 #include "../../src/platform/concurrency.h"
 
 #include "../../src/text_output.h"
 #include "../../src/platform/console_logging.h"
 
+
 #include "../../src/kangaroo_twelve.h"
 #include "../../src/four_q.h"
 
 // Change the number of processors use for testing
-#define NUMBER_TEST_PROCESSORS 256
+#define NUMBER_TEST_PROCESSORS 16
 
 
 #define LOOP_COUNT_TEST 10000
 #define LOOP_COUNT_TEST_SMALL 1000
-#define MAX_NUMBER_TEST_PROCESSORS 256
+#define MAX_NUMBER_TEST_PROCESSORS 32
+static constexpr unsigned long long MEM_BUFFER_SIZE = 52ULL * 1024ULL * 1024ULL;
 typedef struct
 {
-    char lock;
-    bool isReady;
     bool isBSProc;
     unsigned long long id;
     unsigned int StatusFlag;
-    EFI_EVENT event;
-    unsigned char buffer[32];
-    unsigned long long testCase;
 
     unsigned int package;
     unsigned int core;
     unsigned int thread;
 
-    bool testResult;
-
 } Processor;
+
+static EFI_EVENT events[MAX_NUMBER_TEST_PROCESSORS];
+
 static volatile int shutDownNode = 0;
-static EFI_MP_SERVICES_PROTOCOL* mpServicesProtocol;
-static unsigned int numberOfProcessors = 0;
-static volatile char logMessageLock = 0;
+static EFI_MP_SERVICES_PROTOCOL* gpServicesProtocol;
+static unsigned long long gNumberOfAllProcessors = 0;
+//static volatile char logMessageLock = 0;
+
 static Processor processors[MAX_NUMBER_TEST_PROCESSORS];
 
+static char gProcessorLock[MAX_NUMBER_TEST_PROCESSORS];
+static char gProcessorReady[MAX_NUMBER_TEST_PROCESSORS];
+static char gProcessorResult[MAX_NUMBER_TEST_PROCESSORS];
+static unsigned long long gBSProc = 0;
 
+
+// For testing the scheduler save file
+struct SaveFileTestData
+{
+    // Reserve memories
+    unsigned int memBuffer[MEM_BUFFER_SIZE];
+
+    // Randomly parition of data for writing
+    unsigned long long dataPos[4][2];
+};
+
+enum TestName
+{
+    WRITE_FILE = 0,
+    WRITE_LARGE_FILE,
+    READ_FILE,
+    READ_LARGE_FILE,
+    ASYNC_WRITE_FILE,
+    ASYNC_WRITE_LARGE_FILE,
+    ASYNC_BLOCKING_WRITE_FILE,
+    ASYNC_BLOCKING_WRITE_LARGE_FILE,
+    ASYNC_READ_FILE,
+    ASYNC_READ_LARGE_FILE,
+    MAX_TEST
+};
+
+static unsigned int gTestCases[] = {
+    WRITE_FILE,
+    WRITE_LARGE_FILE,
+    READ_FILE,
+    READ_LARGE_FILE,
+    ASYNC_WRITE_FILE,
+    ASYNC_WRITE_LARGE_FILE,
+    ASYNC_BLOCKING_WRITE_FILE,
+    ASYNC_BLOCKING_WRITE_LARGE_FILE,
+    ASYNC_READ_FILE,
+    ASYNC_READ_LARGE_FILE
+};
+static CHAR16 gTestCasesString[MAX_TEST][256];
+
+static unsigned int gCurrentTestCase = gTestCases[0];
+static SaveFileTestData* saveFileTestData[MAX_NUMBER_TEST_PROCESSORS];
+static SaveFileTestData* saveFileTestDataBuffer;
 
 static void logToConsole(const CHAR16* message)
 {
-    timestampedMessage[0] = (time.Year % 100) / 10 + L'0';
-    timestampedMessage[1] = time.Year % 10 + L'0';
-    timestampedMessage[2] = time.Month / 10 + L'0';
-    timestampedMessage[3] = time.Month % 10 + L'0';
-    timestampedMessage[4] = time.Day / 10 + L'0';
-    timestampedMessage[5] = time.Day % 10 + L'0';
-    timestampedMessage[6] = time.Hour / 10 + L'0';
-    timestampedMessage[7] = time.Hour % 10 + L'0';
-    timestampedMessage[8] = time.Minute / 10 + L'0';
-    timestampedMessage[9] = time.Minute % 10 + L'0';
-    timestampedMessage[10] = time.Second / 10 + L'0';
-    timestampedMessage[11] = time.Second % 10 + L'0';
+    timestampedMessage[0] = (utcTime.Year % 100) / 10 + L'0';
+    timestampedMessage[1] = utcTime.Year % 10 + L'0';
+    timestampedMessage[2] = utcTime.Month / 10 + L'0';
+    timestampedMessage[3] = utcTime.Month % 10 + L'0';
+    timestampedMessage[4] = utcTime.Day / 10 + L'0';
+    timestampedMessage[5] = utcTime.Day % 10 + L'0';
+    timestampedMessage[6] = utcTime.Hour / 10 + L'0';
+    timestampedMessage[7] = utcTime.Hour % 10 + L'0';
+    timestampedMessage[8] = utcTime.Minute / 10 + L'0';
+    timestampedMessage[9] = utcTime.Minute % 10 + L'0';
+    timestampedMessage[10] = utcTime.Second / 10 + L'0';
+    timestampedMessage[11] = utcTime.Second % 10 + L'0';
     timestampedMessage[12] = ' ';
     timestampedMessage[13] = 0;
 
@@ -82,11 +131,66 @@ static void enableAVX()
 static bool initialize()
 {
     enableAVX();
+
+    initTimeStampCounter();
+
     return true;
+}
+
+static bool initSaveFileTest()
+{
+    allocatePool(sizeof(SaveFileTestData), (void**)&saveFileTestDataBuffer);
+    setMem(saveFileTestDataBuffer, sizeof(SaveFileTestData), 0);
+    for (int i = 0; i < gNumberOfAllProcessors; i++)
+    {
+        allocatePool(sizeof(SaveFileTestData), (void**)&saveFileTestData[i]);
+        setMem(saveFileTestData[i], sizeof(SaveFileTestData), 0);
+    }
+    return true;
+}
+
+static bool initTest()
+{
+    for (int i = 0; i < MAX_NUMBER_TEST_PROCESSORS; i++)
+    {
+        gProcessorLock[i] = 0;
+        gProcessorReady[i] = 0;
+        gProcessorResult[i] = 0;
+    }
+
+    setText(gTestCasesString[WRITE_FILE], L"WRITE_FILE");
+    setText(gTestCasesString[WRITE_LARGE_FILE], L"WRITE_LARGE_FILE");
+    setText(gTestCasesString[READ_FILE], L"READ_FILE");
+    setText(gTestCasesString[READ_LARGE_FILE], L"READ_LARGE_FILE");
+    setText(gTestCasesString[ASYNC_BLOCKING_WRITE_FILE], L"ASYNC_BLOCKING_WRITE_FILE");
+    setText(gTestCasesString[ASYNC_BLOCKING_WRITE_LARGE_FILE], L"ASYNC_BLOCKING_WRITE_LARGE_FILE");
+    setText(gTestCasesString[ASYNC_WRITE_FILE], L"ASYNC_WRITE_FILE");
+    setText(gTestCasesString[ASYNC_WRITE_LARGE_FILE], L"ASYNC_WRITE_LARGE_FILE");
+    setText(gTestCasesString[ASYNC_READ_FILE], L"ASYNC_READ_FILE");
+    setText(gTestCasesString[ASYNC_READ_LARGE_FILE], L"ASYNC_READ_LARGE_FILE");
+
+    if (!initSaveFileTest())
+    {
+        return false;
+    }
+
+    return true;
+}
+
+static void deinitSaveFileTest()
+{
+    freePool(saveFileTestDataBuffer);
+    for (int i = 0; i < gNumberOfAllProcessors; i++)
+    {
+        freePool(saveFileTestData[i]);
+    }
 }
 
 static void deinitialize()
 {
+    deinitSaveFileTest();
+
+    deInitFileSystem();
 }
 
 inline static unsigned int random(const unsigned int range)
@@ -97,452 +201,568 @@ inline static unsigned int random(const unsigned int range)
     return value % range;
 }
 
-
-
-template <unsigned long long len>
-bool K12Test(unsigned char* outputResult = NULL)
+inline static unsigned long long random64(const unsigned long long range)
 {
-    unsigned char input[64];
-    unsigned char ouput[len];
-    unsigned char overflow_checking[] = { 0, 1,2,3,4,5,6 };
+    unsigned long long value;
+    _rdrand64_step(&value);
 
-    // Random input
-    for (unsigned int i = 0; i < 64; i++) {
-        input[i] = random(255);
+    return (value % range);
+}
+
+void generateDataPerId(int id)
+{
+    // randomly generate a chunk of data
+    for (unsigned long long i = 0; i < MEM_BUFFER_SIZE; i++)
+    {
+        saveFileTestData[id]->memBuffer[i] = random(4096) * (id + 1);
     }
-    KangarooTwelve(input, 64, ouput, len);
 
-    // Checking the overflow buffer
-    for (unsigned int i = 0; i < sizeof(overflow_checking); i++) {
-        if (i != overflow_checking[i]) {
+    // Randomly pick some part of data for writing out
+    unsigned long long remainedData = MEM_BUFFER_SIZE;
+    for (int i = 0; i < sizeof(saveFileTestData[id]->dataPos) / sizeof(saveFileTestData[id]->dataPos[0]); i++)
+    {
+        // Start of the data
+        saveFileTestData[id]->dataPos[i][0] = random64(MEM_BUFFER_SIZE - 1);
+
+        // Size of the data. Make sure we limit all small files in size of total MEM_BUFFER_SIZE
+        unsigned long long dataSize = random64(MEM_BUFFER_SIZE - saveFileTestData[id]->dataPos[i][0]);
+        dataSize = dataSize > remainedData ? remainedData : dataSize;
+        remainedData = remainedData - dataSize;
+
+        if (dataSize == 0)
+        {
+            dataSize = 1;
+        }
+
+        saveFileTestData[id]->dataPos[i][1] = dataSize;
+    }
+}
+
+bool runSaveLargeFile(int processId, bool paralellFlag = true, bool blocking = true)
+{
+    int id = processId;
+
+    // Save file
+    CHAR16 fileName[32];
+    setText(fileName, L"file_");
+    appendNumber(fileName, id, false);
+
+    // Generate random data
+    for (unsigned long long i = 0; i < MEM_BUFFER_SIZE; i++)
+    {
+        saveFileTestData[id]->memBuffer[i] = random(4096) * (id + 1);
+    }
+
+    // Try to save the files
+    long long sts = -1;
+    if (paralellFlag)
+    {
+        sts = asyncSaveLargeFile(fileName, MEM_BUFFER_SIZE * sizeof(unsigned int), (unsigned char*)(saveFileTestData[id]->memBuffer), NULL, false, blocking);
+    }
+    else
+    {
+        sts = saveLargeFile(fileName, MEM_BUFFER_SIZE * sizeof(unsigned int), (unsigned char*)(saveFileTestData[id]->memBuffer), NULL, false);
+    }
+    if (sts <= 0 || sts != MEM_BUFFER_SIZE * sizeof(unsigned int))
+    {
+        CHAR16 loginfo[256];
+        setText(loginfo, L"saveFile failed at ");
+        appendText(loginfo, fileName);
+        appendText(loginfo, L" with size ");
+        appendNumber(loginfo, MEM_BUFFER_SIZE * sizeof(unsigned int) / 1024, true);
+        appendText(loginfo, L"KB . Error: -");
+        appendNumber(loginfo, -sts, true);
+
+        ACQUIRE(logMessageLock);
+        logToConsole(loginfo);
+        RELEASE(logMessageLock);
+
+        return false;
+    }
+
+    return true;
+}
+
+bool runSaveFile(int processId, bool parallelFlag = true, bool blocking = true)
+{
+    int id = processId;
+
+    // Save file
+    CHAR16 fileName[32];
+    setText(fileName, L"file_");
+    appendNumber(fileName, id, false);
+
+    // Generate random data
+    generateDataPerId(id);
+
+    // Try to save the files
+    for (int i = 0; i < sizeof(saveFileTestData[id]->dataPos) / sizeof(saveFileTestData[id]->dataPos[0]); i++)
+    {
+        unsigned long long dataStart = saveFileTestData[id]->dataPos[i][0];
+        unsigned long long dataCount = saveFileTestData[id]->dataPos[i][1];
+
+        CHAR16 partionFileName[256];
+        setText(partionFileName, fileName);
+        appendText(partionFileName, L".");
+        appendNumber(partionFileName, i, false);
+
+        long long sts = -1;
+        if (parallelFlag)
+        {
+            sts = asyncSave(partionFileName, dataCount * sizeof(unsigned int), (unsigned char*)&(saveFileTestData[id]->memBuffer[dataStart]), NULL, blocking);
+        }
+        else
+        {
+            sts = save(partionFileName, dataCount * sizeof(unsigned int), (unsigned char*)&(saveFileTestData[id]->memBuffer[dataStart]), NULL);
+        }
+
+        if (sts <= 0)
+        {
+            CHAR16 loginfo[256];
+            setText(loginfo, L"saveFile failed at ");
+            appendText(loginfo, partionFileName);
+            appendText(loginfo, L" with size ");
+            appendNumber(loginfo, dataCount * sizeof(unsigned int) / 1024, true);
+            appendText(loginfo, L"KB . Error: -");
+            appendNumber(loginfo, -sts, true);
+
+            ACQUIRE(logMessageLock);
+            logToConsole(loginfo);
+            RELEASE(logMessageLock);
+
             return false;
         }
     }
 
-    // Get the ouput result as 32 bytes
-    if (NULL != outputResult)
+    return true;
+}
+
+bool runReadFile(int processId, bool parallelFlag = true)
+{
+    int id = processId;
+
+    // Save file
+    CHAR16 fileName[32];
+    setText(fileName, L"file_");
+    appendNumber(fileName, id, false);
+
+    // Try to read the files
+    for (int i = 0; i < sizeof(saveFileTestData[id]->dataPos) / sizeof(saveFileTestData[id]->dataPos[0]); i++)
     {
-        KangarooTwelve(ouput, len, outputResult, 32);
+        unsigned long long dataStart = saveFileTestData[id]->dataPos[i][0];
+        unsigned long long dataCount = saveFileTestData[id]->dataPos[i][1];
+
+        CHAR16 partionFileName[256];
+        setText(partionFileName, fileName);
+        appendText(partionFileName, L".");
+        appendNumber(partionFileName, i, false);
+
+        long long sts = -1;
+        if (parallelFlag)
+        {
+            sts = asyncLoad(partionFileName, dataCount * sizeof(unsigned int), (unsigned char*)&(saveFileTestData[id]->memBuffer[dataStart]), NULL);
+        }
+        else
+        {
+            sts = load(partionFileName, dataCount * sizeof(unsigned int), (unsigned char*)&(saveFileTestData[id]->memBuffer[dataStart]), NULL);
+        }
+
+        if (sts <= 0)
+        {
+            CHAR16 loginfo[256];
+            setText(loginfo, L"read failed at ");
+            appendText(loginfo, partionFileName);
+            appendText(loginfo, L" with size ");
+            appendNumber(loginfo, dataCount * sizeof(unsigned int) / 1024, true);
+            appendText(loginfo, L"KB . Error: -");
+            appendNumber(loginfo, -sts, true);
+
+            ACQUIRE(logMessageLock);
+            logToConsole(loginfo);
+            RELEASE(logMessageLock);
+
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool runReadLargeFile(int processId, bool parallelFlag = true)
+{
+    int id = processId;
+
+    // Save file
+    CHAR16 fileName[32];
+    setText(fileName, L"file_");
+    appendNumber(fileName, id, false);
+
+    // Try to load the large file
+    long long sts = -1;
+    if (parallelFlag)
+    {
+        sts = asyncLoadLargeFile(fileName, MEM_BUFFER_SIZE * sizeof(unsigned int), (unsigned char*)(saveFileTestData[id]->memBuffer), NULL);
+    }
+    else
+    {
+        sts = loadLargeFile(fileName, MEM_BUFFER_SIZE * sizeof(unsigned int), (unsigned char*)(saveFileTestData[id]->memBuffer), NULL);
+    }
+    if (sts <= 0 || sts != MEM_BUFFER_SIZE * sizeof(unsigned int))
+    {
+        CHAR16 loginfo[256];
+        setText(loginfo, L"loadLargeFile failed at ");
+        appendText(loginfo, fileName);
+        appendText(loginfo, L" with size ");
+        appendNumber(loginfo, MEM_BUFFER_SIZE * sizeof(unsigned int) / 1024, true);
+        appendText(loginfo, L"KB . Error: -");
+        appendNumber(loginfo, -sts, true);
+
+        ACQUIRE(logMessageLock);
+        logToConsole(loginfo);
+        RELEASE(logMessageLock);
+
+        return false;
+    }
+
+    return true;
+}
+
+bool verifyWriteFile(int id)
+{
+    CHAR16 logInfo[256];
+    CHAR16 fileName[32];
+    setText(fileName, L"file_");
+    appendNumber(fileName, id, false);
+
+    for (int i = 0; i < sizeof(saveFileTestData[id]->dataPos) / sizeof(saveFileTestData[id]->dataPos[0]); i++)
+    {
+        unsigned long long dataStart = saveFileTestData[id]->dataPos[i][0];
+        unsigned long long dataCount = saveFileTestData[id]->dataPos[i][1];
+
+        CHAR16 partionFileName[256];
+        setText(partionFileName, fileName);
+        appendText(partionFileName, L".");
+        appendNumber(partionFileName, i, false);
+
+        long long sts = load(partionFileName, dataCount * sizeof(unsigned int), (unsigned char*)&(saveFileTestDataBuffer->memBuffer[0]), NULL);
+
+        if (sts <= 0)
+        {
+            setText(logInfo, partionFileName);
+            appendText(logInfo, L" is FAILED to load.");
+            logToConsole(logInfo);
+
+            return false;
+        }
+
+        unsigned int* originalData = &(saveFileTestData[id]->memBuffer[dataStart]);
+        unsigned int* loadedData = &(saveFileTestDataBuffer->memBuffer[0]);
+
+        for (unsigned long long k = 0; k < dataCount; k++)
+        {
+            if (originalData[k] != loadedData[k])
+            {
+                setText(logInfo, partionFileName);
+                appendText(logInfo, L" Data mismatched. [");
+                appendNumber(logInfo, k, false);
+                appendText(logInfo, L"]: ");
+                appendNumber(logInfo, originalData[k], false );
+                appendText(logInfo, L" vs  ");
+                appendNumber(logInfo, loadedData[k], false);
+                logToConsole(logInfo);
+
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+bool verifyWriteLargeFile(int id)
+{
+    CHAR16 logInfo[256];
+    CHAR16 fileName[32];
+    setText(fileName, L"file_");
+    appendNumber(fileName, id, false);
+
+    setMem((unsigned char*)&(saveFileTestDataBuffer->memBuffer[0]), MEM_BUFFER_SIZE * sizeof(unsigned int), 0);
+    long long sts = loadLargeFile(fileName, MEM_BUFFER_SIZE * sizeof(unsigned int), (unsigned char*)&(saveFileTestDataBuffer->memBuffer[0]), NULL);
+
+    if (sts <= 0 || sts != MEM_BUFFER_SIZE * sizeof(unsigned int))
+    {
+        setText(logInfo, fileName);
+        appendText(logInfo, L" is FAILED to load.");
+        logToConsole(logInfo);
+
+        return false;
+    }
+
+    unsigned int* originalData = saveFileTestData[id]->memBuffer;
+    unsigned int* loadedData = saveFileTestDataBuffer->memBuffer;
+
+    for (unsigned long long k = 0; k < MEM_BUFFER_SIZE; k++)
+    {
+        if (originalData[k] != loadedData[k])
+        {
+            setText(logInfo, fileName);
+            appendText(logInfo, L" Data mismatched. [");
+            appendNumber(logInfo, k, false);
+            appendText(logInfo, L"]: ");
+            appendNumber(logInfo, originalData[k], false);
+            appendText(logInfo, L" vs  ");
+            appendNumber(logInfo, loadedData[k], false);
+            logToConsole(logInfo);
+
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool verifyWriteResult(bool parallelFlag)
+{
+    // Scheduler write will happen here. Flush all data to disk.
+    flushAsyncFileIOBuffer();
+
+    CHAR16 logInfo[256];
+    // Check the result by loading the file and compare
+    int matchFileCount = 0;
+    int expectedMatchFileCount = parallelFlag ? gNumberOfAllProcessors : 1;
+    for (int id = 0; id < gNumberOfAllProcessors; id++)
+    {
+        if (parallelFlag)
+        {
+            if (verifyWriteFile(id))
+            {
+                matchFileCount++;
+            }
+        }
+        else
+        {
+            if (id == gBSProc)
+            {
+                if (verifyWriteFile(id))
+                {
+                    matchFileCount++;
+                }
+                break;
+            }
+        }
+
+    }
+
+    setText(logInfo, L"  - Matched data: ");
+    appendNumber(logInfo, matchFileCount, false);
+    appendText(logInfo, L" / ");
+    appendNumber(logInfo, expectedMatchFileCount, false);
+    logToConsole(logInfo);
+
+    return (matchFileCount == expectedMatchFileCount);
+}
+
+bool verifyLargeFileWriteResult(bool parallelFlag)
+{
+    // Scheduler write will happen here. Flush all data to disk.
+    flushAsyncFileIOBuffer();
+
+    CHAR16 logInfo[256];
+    // Check the result by loading the file and compare
+    int matchFileCount = 0;
+    int expectedMatchFileCount = parallelFlag ? gNumberOfAllProcessors : 1;
+    for (int id = 0; id < gNumberOfAllProcessors; id++)
+    {
+        if (parallelFlag)
+        {
+            if (verifyWriteLargeFile(id))
+            {
+                matchFileCount++;
+            }
+        }
+        else
+        {
+            if (id == gBSProc)
+            {
+                if (verifyWriteLargeFile(id))
+                {
+                    matchFileCount++;
+                }
+                break;
+            }
+        }
+
+    }
+
+    setText(logInfo, L"  - Matched data: ");
+    appendNumber(logInfo, matchFileCount, false);
+    appendText(logInfo, L" / ");
+    appendNumber(logInfo, expectedMatchFileCount, false);
+    logToConsole(logInfo);
+
+    return (matchFileCount == expectedMatchFileCount);
+
+    return true;
+}
+
+bool prepareTest()
+{
+    // For test loading files. Generate a list of files before reading
+    for (int id = 0; id < gNumberOfAllProcessors; id++)
+    {
+        bool sts = true;
+        switch (gCurrentTestCase)
+        {
+            case READ_FILE:
+                sts = runSaveFile(id, false);
+                break;
+            case READ_LARGE_FILE:
+                sts = runSaveLargeFile(id, false);
+                break;
+            case ASYNC_READ_FILE:
+                sts = runSaveFile(id, false);
+                break;
+            case ASYNC_READ_LARGE_FILE:
+                sts = runSaveLargeFile(id, false);
+                break;
+            default:
+                break;
+        }
+
+        if (!sts)
+        {
+            logToConsole(L"Prepare test for READ file is failed");
+            return false;
+        }
     }
     return true;
 }
 
-EFI_STATUS TestStackLimitTemplateK12() {
-
-    static unsigned char output[32];
-    constexpr unsigned int kb_size = 1024;
-    bs->Stall(1000000);
-    if (!K12Test<32 * kb_size>(output))
-    {
-        return EFI_BAD_BUFFER_SIZE;
-    }
-
-    bs->Stall(1000000);
-    if (!K12Test<64 * kb_size>(output))
-    {
-        return EFI_BAD_BUFFER_SIZE;
-    }
-
-    bs->Stall(1000000);
-    if (!K12Test<512 * kb_size>(output))
-    {
-        return EFI_BAD_BUFFER_SIZE;
-    }
-
-    bs->Stall(1000000);
-    if (!K12Test<(512 + 16) * kb_size>(output))
-    {
-        return EFI_BAD_BUFFER_SIZE;
-    }
-
-    bs->Stall(1000000);
-    if (!K12Test<(512 + 32) * kb_size>(output))
-    {
-        return EFI_BAD_BUFFER_SIZE;
-    }
-
-    bs->Stall(1000000);
-    if (!K12Test<(512 + 64) * kb_size>(output))
-    {
-        return EFI_BAD_BUFFER_SIZE;
-    }
-
-    bs->Stall(1000000);
-    if (!K12Test<(512 + 128) * kb_size>(output))
-    {
-        return EFI_BAD_BUFFER_SIZE;
-    }
-
-    bs->Stall(1000000);
-    if (!K12Test<(1024) * kb_size>(output))
-    {
-        return EFI_BAD_BUFFER_SIZE;
-    }
-
-    bs->Stall(1000000);
-    if (!K12Test<(1024 + 16) * kb_size>(output))
-    {
-        return EFI_BAD_BUFFER_SIZE;
-    }
-
-    bs->Stall(1000000);
-    if (!K12Test<(1024 + 32) * kb_size>(output))
-    {
-        return EFI_BAD_BUFFER_SIZE;
-    }
-
-    bs->Stall(1000000);
-    if (!K12Test<(1024 + 64) * kb_size>(output))
-    {
-        return EFI_BAD_BUFFER_SIZE;
-    }
-
-    bs->Stall(1000000);
-    if (!K12Test<(1024 + 128) * kb_size>(output))
-    {
-        return EFI_BAD_BUFFER_SIZE;
-    }
-
-    bs->Stall(1000000);
-    if (!K12Test<(1024 + 256) * kb_size>(output))
-    {
-        return EFI_BAD_BUFFER_SIZE;
-    }
-
-    bs->Stall(1000000);
-    if (!K12Test<(1024 + 512) * kb_size>(output))
-    {
-        return EFI_BAD_BUFFER_SIZE;
-    }
-
-    bs->Stall(1000000);
-    if (!K12Test<(1024 + 512 + 48) * kb_size>(output))
-    {
-        return EFI_BAD_BUFFER_SIZE;
-    }
-
-    bs->Stall(1000000);
-    if (!K12Test<(1599) * kb_size>(output))
-    {
-        return EFI_BAD_BUFFER_SIZE;
-    }
-
-    return EFI_SUCCESS;
-}
-
-
-
-void TestStackLimitTemplateK12Processor(void* proccessorInfo) {
-    constexpr unsigned int kb_size = 1024;
-    CHAR16 messageK12[512];
-
-    Processor* process = (Processor*)proccessorInfo;
-    bool testResult = true;
-    switch (process->testCase)
-    {
-    case 4:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<4 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 8:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<8 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 12:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<12 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 16:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<16 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 20:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<20 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 24:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<24 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 28:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<28 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 29:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<29 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 30:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<30 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 31:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<31 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-        // 32KB
-    case 32:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<32 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 36:
-        for (int i = 0; i < LOOP_COUNT_TEST; i++)
-        {
-            testResult = K12Test<36 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 40:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<40 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 44:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<44 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 48:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<48 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 52:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<52 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 56:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<56 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 60:
-        for (int i = 0; i < LOOP_COUNT_TEST; i++)
-        {
-            testResult = K12Test<60 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-        // 64KB
-    case 64:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<64 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 68:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<68 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 72:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<72 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 76:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<76 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 80:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<80 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 84:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<84 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 88:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            K12Test<88 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 82:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<92 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 96:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<96 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-        // 128KB
-    case 128:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<128 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 512:
-        for (int i = 0; i < LOOP_COUNT_TEST && testResult; i++)
-        {
-            testResult = K12Test<512 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 900:
-        for (int i = 0; i < LOOP_COUNT_TEST_SMALL && testResult; i++)
-        {
-            testResult = K12Test<900 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 990:
-        for (int i = 0; i < LOOP_COUNT_TEST_SMALL && testResult; i++)
-        {
-            testResult = K12Test<990 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 1000:
-        for (int i = 0; i < LOOP_COUNT_TEST_SMALL && testResult; i++)
-        {
-            testResult = K12Test<1000 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 1024:
-        for (int i = 0; i < LOOP_COUNT_TEST_SMALL && testResult; i++)
-        {
-            testResult = K12Test<1024 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 1500:
-        for (int i = 0; i < LOOP_COUNT_TEST_SMALL && testResult; i++)
-        {
-            testResult = K12Test<1500 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    case 1599: // Maximum size set by /Gs
-        for (int i = 0; i < LOOP_COUNT_TEST_SMALL && testResult; i++)
-        {
-            testResult = K12Test<1599 * kb_size>(&(process->buffer[0]));
-        }
-        break;
-    default:
-        break;
-    }
-    process->testResult = testResult;
-
-    ACQUIRE(process->lock);
-    process->isReady = true;
-    RELEASE(process->lock);
-}
-
-
-EFI_STATUS TestStackLimit(unsigned int depth) {
-    // 4KB each call
-    volatile unsigned char buffer[2 * 1024];
-
-    // Initialize buffer to consume stack space
-    for (int i = 0; i < sizeof(buffer); i++) {
-        buffer[i] = i;
-    }
-
-    unsigned long long totalBytesInStack = (depth + 1) * sizeof(buffer);
-    // Stall the print to see the result
-    if (totalBytesInStack > 1024 * 1024)
-    {
-        bs->Stall(200000);
-    }
-    else if (totalBytesInStack > 1500 * 1024) {
-        bs->Stall(500000);
-    }
-    setText(message, L"Level ");
-    appendNumber(message, depth, false); appendText(message, L": , size: ");
-    appendNumber(message, totalBytesInStack >> 10, false);  appendText(message, L" KB");
-    logToConsole(message);
-
-    // Recursively call
-    EFI_STATUS Status = TestStackLimit(depth + 1);
-
-    if (Status == EFI_LOAD_ERROR) {
-        // Check for stack overflow. Actually it crashes here
-        return depth;
-    }
-
-    return EFI_SUCCESS;
-
-}
-
-
-template <unsigned long long numberOfKB>
-void StackLimitTemplate()
+bool verifyResult()
 {
-    setText(message, L"Test ");
-    appendNumber(message, numberOfKB, false); appendText(message, L" KB ");
-    volatile unsigned char buffer[numberOfKB * 1024];
-    // Initialize buffer 
-    for (unsigned long long i = 0; i < sizeof(buffer); i++) {
-        buffer[i] = i;
+    bool allTestPass = true;
+
+    // Check test result
+    CHAR16 logInfo[256];
+    for (int id = 0; id < gNumberOfAllProcessors; id++)
+    {
+        if (gProcessorResult[id] == 0)
+        {
+            allTestPass = false;
+            setText(logInfo, L"Read/Write failed at thread ");
+            appendNumber(logInfo, id, false);
+            logToConsole(logInfo);
+        }
     }
-    appendText(message, L"OK ");
-    logToConsole(message);
-};
 
-EFI_STATUS TestStackLimitTemplate() {
+    // Test matching data.
+    if (allTestPass)
+    {
+        switch (gCurrentTestCase)
+        {
+        case WRITE_FILE:
+            allTestPass = verifyWriteResult(false);
+            break;
+        case ASYNC_WRITE_FILE:
+        case ASYNC_BLOCKING_WRITE_FILE:
+            allTestPass = verifyWriteResult(true);
+            break;
+        case WRITE_LARGE_FILE:
+            allTestPass = verifyLargeFileWriteResult(false);
+            break;
+        case ASYNC_WRITE_LARGE_FILE:
+        case ASYNC_BLOCKING_WRITE_LARGE_FILE:
+            allTestPass = verifyLargeFileWriteResult(true);
+            break;
+        case READ_FILE:
+            allTestPass = verifyWriteResult(true);
+            break;
+        case READ_LARGE_FILE:
+            allTestPass = verifyLargeFileWriteResult(true);
+            break;
+        case ASYNC_READ_FILE:
+            allTestPass = verifyWriteResult(true);
+            break;
+        case ASYNC_READ_LARGE_FILE:
+            allTestPass = verifyLargeFileWriteResult(true);
+            break;
+        default:
+            break;
+        }
+    }
 
-    StackLimitTemplate<16>();
-    StackLimitTemplate<32>();
-    StackLimitTemplate<64>();
-    StackLimitTemplate<128>();
-    StackLimitTemplate<256>();
-    StackLimitTemplate<512>();
-    StackLimitTemplate<512 + 16>();
-    StackLimitTemplate<512 + 32>();
-    StackLimitTemplate<512 + 64>();
-    StackLimitTemplate<512 + 128>();
-    StackLimitTemplate<512 + 256>();
-    StackLimitTemplate<1024>();
-    StackLimitTemplate<1024 + 16>();
-    StackLimitTemplate<1024 + 32>();
-    StackLimitTemplate<1024 + 64>();
-    StackLimitTemplate<1024 + 128>();
-    StackLimitTemplate<1024 + 256>();
-    StackLimitTemplate<1024 + 512>();
-    StackLimitTemplate<1024 + 512 + 16>();
-    StackLimitTemplate<1024 + 512 + 32>();
-    StackLimitTemplate<1024 + 512 + 48>();
-
-    // Maximum size set by /Gs
-    StackLimitTemplate<1599>();
-    return EFI_SUCCESS;
+    return allTestPass;
 }
 
+#pragma optimize("", off)
+// Main test function for each processor
+void threadRun(void* processId)
+{
+    unsigned long long processorNumber;
+    gpServicesProtocol->WhoAmI(gpServicesProtocol, &processorNumber);
+
+    int id = processorNumber;
+    bool testResult = true;
+
+    ACQUIRE(gProcessorLock[id]);
+    gProcessorReady[id] = 0;
+    RELEASE(gProcessorLock[id]);
+
+    //CHAR16 logInfo[256];
+    //setText(logInfo, L"Thread id");
+    //appendNumber(logInfo, id, false);
+
+    ////if (id == 0)
+    //{
+    //    ACQUIRE(logMessageLock);
+    //    logToConsole(logInfo);
+    //    RELEASE(logMessageLock);
+    //}
+
+    // Test the save file
+    switch (gCurrentTestCase)
+    {
+        case WRITE_FILE:
+            testResult = runSaveFile(id, false);
+            break;
+        case WRITE_LARGE_FILE:
+            testResult = runSaveLargeFile(id, false);
+            break;
+        case ASYNC_WRITE_FILE:
+            testResult = runSaveFile(id, true, false);
+            break;
+        case ASYNC_WRITE_LARGE_FILE:
+            testResult = runSaveLargeFile(id, true, false);
+            break;
+        case ASYNC_BLOCKING_WRITE_FILE:
+            testResult = runSaveFile(id, true, true);
+            break;
+        case ASYNC_BLOCKING_WRITE_LARGE_FILE:
+            testResult = runSaveLargeFile(id, true, true);
+            break;
+        case READ_FILE:
+            testResult = runReadFile(id, false);
+            break;
+        case READ_LARGE_FILE:
+            testResult = runReadLargeFile(id, false);
+            break;
+        case ASYNC_READ_FILE:
+            testResult = runReadFile(id, true);
+            break;
+        case ASYNC_READ_LARGE_FILE:
+            testResult = runReadLargeFile(id, true);
+            break;
+        default:
+            break;
+    }
+
+
+    gProcessorResult[id] = testResult ? 1 : 0;
+
+    ACQUIRE(gProcessorLock[id]);
+    gProcessorReady[id] = 1;
+    RELEASE(gProcessorLock[id]);
+}
 
 static void processKeyPresses()
 {
@@ -557,15 +777,8 @@ static void processKeyPresses()
             */
         case 0x0C:
         {
-            logToConsole(L"Pressed F2 key. Test with recursive call. Will crash when hit recursion level or stack overflow.");
-            EFI_STATUS sts = TestStackLimit(0);
-            if (sts == EFI_SUCCESS) {
-                appendText(message, L" Stack limit tested successfully.");
-            }
-            else {
-                appendText(message, L"Stack overflow occurred at depth.");
-                appendNumber(message, (int)sts, false);
-            }
+            logToConsole(L"Pressed F2 key. ");
+
         }
         break;
         /*
@@ -574,8 +787,7 @@ static void processKeyPresses()
        */
         case 0x0D:
         {
-            logToConsole(L"Pressed F2 key. Test with interative call. Will crash if stack overflow.");
-            TestStackLimitTemplate();
+            logToConsole(L"Pressed F2 key.");
         }
         break;
         /*
@@ -583,8 +795,7 @@ static void processKeyPresses()
         */
         case 0x0E:
         {
-            logToConsole(L"Pressed F4 key. Test with K12 computation. Will crash if stack overflow.");
-            TestStackLimitTemplateK12();
+            logToConsole(L"Pressed F4 key.");
         }
         break;
         /*
@@ -607,6 +818,11 @@ static void processKeyPresses()
 static void shutdownCallback(EFI_EVENT Event, void* Context)
 {
     bs->CloseEvent(Event);
+}
+
+void processorEventCallback(EFI_EVENT Event, void* Context)
+{
+
 }
 
 
@@ -637,15 +853,15 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
         // MP service protocol
         unsigned int computingProcessorNumber;
         EFI_GUID mpServiceProtocolGuid = EFI_MP_SERVICES_PROTOCOL_GUID;
-        status = bs->LocateProtocol(&mpServiceProtocolGuid, NULL, (void**)&mpServicesProtocol);
+        status = bs->LocateProtocol(&mpServiceProtocolGuid, NULL, (void**)&gpServicesProtocol);
         if (EFI_SUCCESS != status)
         {
             logToConsole(L"Can not locate MP_SERVICES_PROTOCOL");
         }
 
         // Get number of processers and enabled processors
-        unsigned long long numberOfAllProcessors, numberOfEnabledProcessors;
-        status = mpServicesProtocol->GetNumberOfProcessors(mpServicesProtocol, &numberOfAllProcessors, &numberOfEnabledProcessors);
+        unsigned long long  numberOfEnabledProcessors;
+        status = gpServicesProtocol->GetNumberOfProcessors(gpServicesProtocol, &gNumberOfAllProcessors, &numberOfEnabledProcessors);
         if (EFI_SUCCESS != status)
         {
             logToConsole(L"Can not get number of processors.");
@@ -653,158 +869,200 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
         setText(loginfo, L"Enabled processors: ");
         appendNumber(loginfo, numberOfEnabledProcessors, false);
         appendText(loginfo, L" / ");
-        appendNumber(loginfo, numberOfAllProcessors, false);
+        appendNumber(loginfo, gNumberOfAllProcessors, false);
 
-        numberOfAllProcessors = numberOfAllProcessors > NUMBER_TEST_PROCESSORS ? NUMBER_TEST_PROCESSORS : numberOfAllProcessors;
+        gNumberOfAllProcessors = gNumberOfAllProcessors > NUMBER_TEST_PROCESSORS ? NUMBER_TEST_PROCESSORS : gNumberOfAllProcessors;
         appendText(loginfo, L". Using ");
-        appendNumber(loginfo, numberOfAllProcessors, false);
+        appendNumber(loginfo, gNumberOfAllProcessors, false);
         appendText(loginfo, L" processors ");
-
         logToConsole(loginfo);
 
-        static int testCases[] = { 16, 30, 31, 32 , 36, 40, 44, 48, 52 , 56, 60, 64, 68, 72, 76, 80, 84, 88, 92, 96, 128, 512, 900 ,990, 1024, 1500, 1599 };
         // Processor health and location
         int bsProcID = 0;
-        for (int i = 0; i < numberOfAllProcessors; i++)
+        for (int i = 0; i < gNumberOfAllProcessors; i++)
         {
             EFI_PROCESSOR_INFORMATION procInfo;
-            status = mpServicesProtocol->GetProcessorInfo(mpServicesProtocol, i, &procInfo);
+            status = gpServicesProtocol->GetProcessorInfo(gpServicesProtocol, i, &procInfo);
             processors[i].id = procInfo.ProcessorId;
             processors[i].StatusFlag = procInfo.StatusFlag;
-            processors[i].lock = 0;
             if (procInfo.StatusFlag & 0x1)
             {
                 processors[i].isBSProc = true;
                 bsProcID = i;
+                gBSProc = bsProcID;
             }
             else
             {
                 processors[i].isBSProc = false;
-
-                // Create event for AP
-                status = bs->CreateEvent(EVT_NOTIFY_SIGNAL, TPL_NOTIFY, NULL, NULL, &processors[i].event);
-                processors[i].isReady = false;
             }
 
             EFI_CPU_PHYSICAL_LOCATION cpuLocation = procInfo.Location;
             processors[i].package = cpuLocation.Package;
             processors[i].core = cpuLocation.Core;
             processors[i].thread = cpuLocation.Thread;
-
-            setText(loginfo, L"Processor ");
-            appendNumber(loginfo, i, false);
-            if (processors[i].isBSProc)
-            {
-                appendText(loginfo, L" [BS] ");
-            }
-            appendText(loginfo, L" : id = ");
-            appendNumber(loginfo, processors[i].id, false);
-            appendText(loginfo, L" , StsFlag = ");
-            appendNumber(loginfo, processors[i].StatusFlag, false);
-            appendText(loginfo, L" , Location: ");
-            appendText(loginfo, L"Package ");  appendNumber(loginfo, processors[i].package, false);
-            appendText(loginfo, L" , Core ");  appendNumber(loginfo, processors[i].core, false);
-            appendText(loginfo, L" , Thread ");  appendNumber(loginfo, processors[i].thread, false);
-            logToConsole(loginfo);
         }
 
-        for (int test = 0; test < sizeof(testCases) / sizeof(testCases[0]); test++)
         {
-            setText(loginfo, L"Test ");
-            appendNumber(loginfo, testCases[test], false);
-            appendText(loginfo, L" KB ...");
+            setText(loginfo, L"BS Processor ");
+            appendText(loginfo, L"id: ");
+            appendNumber(loginfo, bsProcID, false);
             logToConsole(loginfo);
-
-            // Start the task for all application Proccessor
-            for (int i = 0; i < numberOfAllProcessors; i++)
-            {
-                processors[i].testCase = testCases[test];
-                // Start the task if it is an AP
-                if (!processors[i].isBSProc)
-                {
-                    status = mpServicesProtocol->StartupThisAP(mpServicesProtocol, TestStackLimitTemplateK12Processor, i, &processors[i].event,
-                        EFI_TIMEOUT, &processors[i], NULL);
-                }
-            }
-
-            // Start the test with main processor
-            TestStackLimitTemplateK12Processor(&processors[bsProcID]);
-
-            // Wait for all task is done
-            bool isAllTestPassed = true;
-            for (int i = 0; i < numberOfAllProcessors; i++)
-            {
-                bool isReady = false;
-                while (!isReady)
-                {
-                    ACQUIRE(processors[i].lock);
-                    isReady = processors[i].isReady;
-                    RELEASE(processors[i].lock);
-                }
-                processors[i].isReady = false;
-
-                // Check the result
-                if (!processors[i].testResult)
-                {
-                    isAllTestPassed = false;
-                    setText(loginfo, L"Corruption at core ");
-                    appendNumber(loginfo, i, false);
-                    logToConsole(loginfo);
-                }
-
-                //CHAR16 digestChars[61];
-                //getIdentity(processors[i].buffer, digestChars, true);
-
-                //setText(loginfo, L"Test ");
-                //appendNumber(loginfo, processors[i].testCase, false);
-                //appendText(loginfo, L" KB:");
-
-                //appendText(loginfo, L"proc ");
-                //appendNumber(loginfo, processors[i].id, false);
-                //appendText(loginfo, L" disgest: ");
-                //appendText(loginfo, digestChars);
-                //logToConsole(loginfo);
-            }
-            setText(loginfo, L"***Test ");
-            appendNumber(loginfo, testCases[test], false);
-            appendText(loginfo, L" KB");
-            if (isAllTestPassed)
-            {
-                appendText(loginfo, L" is PASSED");
-            }
-            else
-            {
-                appendText(loginfo, L" is FAILED");
-            }
-            logToConsole(loginfo);
-
-            bs->Stall(1000000);
         }
 
-        setText(loginfo, L"K12 multi-thread Stack overflow test DONE. Press F2, F3, F4 to do more agressive test");
+
+        if (!initFilesystem(gpServicesProtocol))
+        {
+            logToConsole(L"Init filesystem failed!");
+            return EFI_ABORTED;
+        }
+
+
+        // Init test
+        initTest();
+
+        int testSuccessCount = 0;
+        int testCount = sizeof(gTestCases) / sizeof(gTestCases[0]);
+
+        // Run the tests
+        setText(loginfo, L"BufferSize for each thread: ");
+        appendNumber(loginfo, MEM_BUFFER_SIZE * sizeof(int) / 1024, false);
+        appendText(loginfo, L" KB");
+        logToConsole(loginfo);
+        for (int test = 0; test < testCount; test++)
+        {
+            gCurrentTestCase = gTestCases[test];
+
+            setText(loginfo, L"Trigger test ");
+            appendNumber(loginfo, test, false);
+            appendText(loginfo, L": ");
+            appendText(loginfo, gTestCasesString[gCurrentTestCase]);
+            logToConsole(loginfo);
+
+            // Prepare the test
+            logToConsole(L"  - Preparing test...");
+            if (!prepareTest())
+            {
+                continue;
+            }
+
+            // Run the test
+            setMem(gProcessorReady, gNumberOfAllProcessors * sizeof(gProcessorReady[0]), 1);
+            setMem(gProcessorResult, gNumberOfAllProcessors * sizeof(gProcessorResult[0]), 0);
+            if (gCurrentTestCase != WRITE_FILE 
+                && gCurrentTestCase != WRITE_LARGE_FILE
+                && gCurrentTestCase != READ_FILE
+                && gCurrentTestCase != READ_LARGE_FILE)
+            {
+                logToConsole(L"  - Running multithread test...");
+                unsigned long long eventsCount = 0;
+                // Start the task for all application Proccessor
+                for (int i = 0; i < gNumberOfAllProcessors; i++)
+                {
+                    // Start the task if it is an AP
+                    if (!processors[i].isBSProc)
+                    {
+                        status = bs->CreateEvent(EVT_NOTIFY_SIGNAL, TPL_CALLBACK, processorEventCallback, NULL, &events[eventsCount]);
+                        if (status != EFI_SUCCESS)
+                        {
+                            setText(loginfo, L"Event ");
+                            appendNumber(loginfo, i, false);
+                            appendText(loginfo, L" is failed to created.");
+                            logToConsole(loginfo);
+                        }
+                        status = gpServicesProtocol->StartupThisAP(gpServicesProtocol, threadRun, i, events[eventsCount], 0, &i, NULL);
+                        if (status != EFI_SUCCESS)
+                        {
+                            setText(loginfo, L"Process ");
+                            appendNumber(loginfo, i, false);
+                            appendText(loginfo, L" is failed to start.");
+                            logToConsole(loginfo);
+                        }
+                        eventsCount++;
+                    }
+                }
+
+                // Start the test with main processor
+                threadRun(&bsProcID);
+
+                // Wait for all task is done
+                logToConsole(L"  - Waiting for all tasks done...");
+                unsigned long long startTick = __rdtsc();
+                int readyCount = 0;
+                while (readyCount < gNumberOfAllProcessors)
+                {
+                    // Don't flush right away. Wait sometimes for simulate
+                    unsigned long long waitingTimeInMs = (__rdtsc() - startTick) * 1000 / frequency;
+                    if (waitingTimeInMs > 30000)
+                    {
+                        logToConsole(L"  - Flusing the buffer ...");
+                        startTick = __rdtsc();
+                        flushAsyncFileIOBuffer();
+                    }
+
+                    readyCount = 0;
+                    for (int i = 0; i < gNumberOfAllProcessors; i++)
+                    {
+                        char readyFlag = 0;
+                        ACQUIRE(gProcessorLock[i]);
+                        readyFlag = gProcessorReady[i];
+                        RELEASE(gProcessorLock[i]);
+                        if (readyFlag)
+                        {
+                            readyCount++;
+                        }
+                    }
+                }
+
+                // Close all events
+                for (int k = 0; k < eventsCount; k++)
+                {
+                    bs->CloseEvent(events[k]);
+                }
+
+            }
+            else // single thread test
+            {
+                logToConsole(L"  - Running test...");
+
+                // Start the test with main processor
+                setMem(gProcessorResult, gNumberOfAllProcessors * sizeof(gProcessorResult[0]), 1);
+                threadRun(&bsProcID);
+            }
+
+            logToConsole(L"  - Verifying result...");
+
+            // Verify results
+            bool sts = verifyResult();
+            if (sts)
+            {
+                testSuccessCount++;
+            }
+
+        }
+        // Show test result
+        setText(loginfo, L"Passed tests: ");
+        appendNumber(loginfo, testSuccessCount, false);
+        appendText(loginfo, L" / ");
+        appendNumber(loginfo, testCount, false);
         logToConsole(loginfo);
 
-        // Close all event
-        for (int i = 0; i < numberOfAllProcessors; i++)
-        {
-            if (!processors[i].isBSProc)
-            {
-                bs->CloseEvent(&processors[i].event);
-            }
-        }
+        setText(loginfo, L"Multi-thread test DONE. Press F2, F3, F4 to do more agressive test");
+        logToConsole(loginfo);
 
         // -----------------------------------------------------
         // Wait for more test
-        logToConsole(L"Test with K12 multi-threads DONE");
+        logToConsole(L"Tests DONE. Waiting for key press...");
         while (!shutDownNode)
         {
             processKeyPresses();
         }
+
     }
     else
     {
         logToConsole(L"Initialization fails!");
     }
+
 
     deinitialize();
 
