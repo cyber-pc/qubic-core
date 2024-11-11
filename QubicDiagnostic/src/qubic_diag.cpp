@@ -5,6 +5,7 @@
 #include "../../src/platform/time.h"
 #include "../../src/platform/time_stamp_counter.h"
 #include "../../src/platform/concurrency.h"
+#include "../../src/platform/file_io.h"
 
 #include "../../src/text_output.h"
 #include "../../src/platform/console_logging.h"
@@ -19,6 +20,8 @@
 #define LOOP_COUNT_TEST 10000
 #define LOOP_COUNT_TEST_SMALL 1000
 #define MAX_NUMBER_TEST_PROCESSORS 256
+
+static constexpr unsigned long long TEST_FILE_SIZE = 1024 * 1024 * 1024;
 typedef struct
 {
     char lock;
@@ -35,6 +38,12 @@ typedef struct
     unsigned int thread;
 
     bool testResult;
+
+    // Mem
+    unsigned char* memBuffer;
+
+    // File root
+    EFI_FILE_PROTOCOL* pRootFile;
 
 } Processor;
 static volatile int shutDownNode = 0;
@@ -82,11 +91,22 @@ static void enableAVX()
 static bool initialize()
 {
     enableAVX();
+
+    if (!initFilesystem())
+    {
+        return false;
+    }
+
     return true;
 }
 
-static void deinitialize()
+static void deinitialize(unsigned int numberOfAllProcessors)
 {
+    // Clean up the memory of each processor
+    for (int i = 0; i < numberOfAllProcessors; i++)
+    {
+        freePool(processors[i].memBuffer);
+    }
 }
 
 inline static unsigned int random(const unsigned int range)
@@ -97,21 +117,49 @@ inline static unsigned int random(const unsigned int range)
     return value % range;
 }
 
-// Main test function for each processor
-void threadRun(void* proccessorInfo) {
-    constexpr unsigned int kb_size = 1024;
-    CHAR16 messageK12[512];
+// Test function
+bool writeSimpleFile(CHAR16* filename, unsigned long long byteSize, unsigned char* buffer)
+{
+    long long savedSize = save(filename, byteSize, buffer);
+    if (savedSize == byteSize)
+    {
+        return true;
+    }
+    return false;
+}
 
+bool allocateMemTest(unsigned long long id, unsigned long long byteSize, unsigned char* buffer)
+{
+    bool sts = allocatePool(byteSize, (void**)(&buffer));
+    return sts;
+}
+
+// Main test function for each processor
+void threadRun(void* proccessorInfo)
+{
     Processor* process = (Processor*)proccessorInfo;
     bool testResult = true;
+
+    //testResult = allocateMemTest(process->id, fileSize, process->memBuffer);
+    //if (testResult)
+    {
+        CHAR16 fileName[256];
+        setText(fileName, L"dump_file_");
+        appendNumber(fileName, process->id, false);
+        appendText(fileName, L".bin");
+
+        // Write with separate file root
+        //testResult = save2(fileName, TEST_FILE_SIZE, process->memBuffer, NULL, process->pRootFile);
+
+        testResult = save(fileName, TEST_FILE_SIZE, process->memBuffer, NULL);
+    }
+
     process->testResult = testResult;
 
     ACQUIRE(process->lock);
     process->isReady = true;
     RELEASE(process->lock);
 }
-
-
 
 
 static void processKeyPresses()
@@ -189,6 +237,7 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
     logToConsole(message);
 
     EFI_STATUS status;
+    unsigned long long numberOfAllProcessors, numberOfEnabledProcessors;
     if (initialize())
     {
         logToConsole(L"Setting up multiprocessing ...");
@@ -205,7 +254,6 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
         }
 
         // Get number of processers and enabled processors
-        unsigned long long numberOfAllProcessors, numberOfEnabledProcessors;
         status = mpServicesProtocol->GetNumberOfProcessors(mpServicesProtocol, &numberOfAllProcessors, &numberOfEnabledProcessors);
         if (EFI_SUCCESS != status)
         {
@@ -251,6 +299,43 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
             processors[i].package = cpuLocation.Package;
             processors[i].core = cpuLocation.Core;
             processors[i].thread = cpuLocation.Thread;
+
+            // Allocated memory 
+            processors[i].memBuffer = NULL;
+            bool allocateMem = allocatePool(TEST_FILE_SIZE, (void**)&(processors[i].memBuffer));
+            if (!allocateMem)
+            {
+                setText(loginfo, L"Failed to allocated ");
+                appendNumber(loginfo, TEST_FILE_SIZE / 1024, false);
+                appendText(loginfo, L" KB at proc ");
+                appendNumber(loginfo, i, false);
+                logToConsole(loginfo);
+            }
+
+            // Init the filesystem for each processor
+            bool initFileSystem = initFilesystem2(processors[i].pRootFile);
+
+            if (!initFileSystem)
+            {
+                setText(loginfo, L"Failed to initFileSystem for proc ");
+                appendNumber(loginfo,i, false);
+                logToConsole(loginfo);
+            }
+        }
+
+        // Write a file for validating one thread write success fully
+        {
+            setText(loginfo, L"test_file_init.bin");
+            bool sts = writeSimpleFile(loginfo, TEST_FILE_SIZE, processors[bsProcID].memBuffer);
+            if (sts)
+            {
+                appendText(loginfo, L" is successfully to be saved.");
+            }
+            else
+            {
+                appendText(loginfo, L" is FAILED to be saved.");
+            }
+            logToConsole(loginfo);
         }
 
         {
@@ -331,7 +416,7 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
         logToConsole(L"Initialization fails!");
     }
 
-    deinitialize();
+    deinitialize(numberOfAllProcessors);
 
     bs->Stall(1000000);
     if (!shutDownNode)
