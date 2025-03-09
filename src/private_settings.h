@@ -13,13 +13,29 @@ static unsigned char computorSeeds[][55 + 1] = {
 // Enter static IPs of peers (ideally at least 4 including your own IP) to disseminate them to other peers.
 // You can find current peer IPs at https://app.qubic.li/network/live
 static const unsigned char knownPublicPeers[][4] = {
-    {127, 0, 0, 1}, // REMOVE THIS ENTRY AND REPLACE IT WITH YOUR OWN IP ADDRESSES
+{10, 29, 1, 16}, // REMOVE THIS ENTRY AND REPLACE IT WITH YOUR OWN IP ADDRESSES
+{213,144,153,60 },
+{5,39,216,162   },
+{45,152,160,16  },
+{31,204,159,143 },
+{45,152,160,22  },
+{176,223,119,131},
+{217,209,209,169},
+{62,113,194,94  },
+{45,152,160,28  },
+{188,241,26,108 },
+{45,152,160,30  },
+{66,23,193,243  },
+{178,237,58,210 },
+{45,152,160,29  },
+{178,237,59,104 },
+{178,237,58,224 },
 };
 
 // Enter static IPs that shall be prioritized in incoming connection
 // There are a connection slots reserved for those whitelist IPs
 static const unsigned char whiteListPeers[][4] = {
-     {127, 0, 0, 1}, // REMOVE THIS ENTRY AND REPLACE IT WITH YOUR OWN IP ADDRESSES
+    {10, 29, 1, 16}
 };
 
 #define LOG_QU_TRANSFERS 0 // "0" disables logging, "1" enables it

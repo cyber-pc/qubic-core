@@ -249,6 +249,30 @@ static void enqueueResponse(Peer* peer, RequestResponseHeader* responseHeader)
     RELEASE(responseQueueHeadLock);
 }
 
+// Hardcode to relay custom message to first white list peer. Can be called from any thread.
+static int enqueueResponseFirstWhiteList(RequestResponseHeader* responseHeader)
+{
+    int respondIndex = -1;
+    for (unsigned int i = 0; i < NUMBER_OF_OUTGOING_CONNECTIONS + NUMBER_OF_INCOMING_CONNECTIONS; i++)
+    {
+        if (peers[i].tcp4Protocol && !peers[i].isClosing)
+        {
+            if (isWhiteListPeer(peers[i].address.u8))
+            {
+                respondIndex = i;
+            }
+        }
+    }
+
+    if (respondIndex < 0)
+    {
+        return -1;
+    }
+
+    enqueueResponse(&peers[respondIndex], responseHeader);
+    return 0;
+}
+
 // Add message to response queue of specific peer. If peer is NULL, it will be sent to random peers. Can be called from any thread.
 static void enqueueResponse(Peer* peer, unsigned int dataSize, unsigned char type, unsigned int dejavu, const void* data)
 {
@@ -299,12 +323,13 @@ static void enqueueResponse(Peer* peer, unsigned int dataSize, unsigned char typ
 */
 static bool isBogonAddress(const IPv4Address& address)
 {
-    return (!address.u8[0])
-        || (address.u8[0] == 127)
-        || (address.u8[0] == 10)
-        || (address.u8[0] == 172 && address.u8[1] >= 16 && address.u8[1] <= 31)
-        || (address.u8[0] == 192 && address.u8[1] == 168)
-        || (address.u8[0] == 255);
+    return false;
+    //return (!address.u8[0])
+    //    || (address.u8[0] == 127)
+    //    || (address.u8[0] == 10)
+    //    || (address.u8[0] == 172 && address.u8[1] >= 16 && address.u8[1] <= 31)
+    //    || (address.u8[0] == 192 && address.u8[1] == 168)
+    //    || (address.u8[0] == 255);
 }
 
 /**

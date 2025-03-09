@@ -205,6 +205,8 @@ static SpecialCommandGetMiningScoreRanking<MAX_NUMBER_OF_MINERS> requestMiningSc
 
 
 static unsigned long long customMiningMessageCounters[NUMBER_OF_COMPUTORS] = { 0 };
+static char customeMiningLock = 0;
+static unsigned long long customMessageCount = 0;
 
 
 // variables and declare for persisting state
@@ -500,6 +502,17 @@ static void processBroadcastMessage(const unsigned long long processorNumber, Re
                 {
                     // See CustomMiningTaskMessage structure
                     // MESSAGE_TYPE_CUSTOM_MINING_TASK
+                    ACQUIRE(customeMiningLock);
+                    customMessageCount++;
+                    RELEASE(customeMiningLock);
+
+                    int sts = enqueueResponseFirstWhiteList(header);
+                    if (sts < 0)
+                    {
+                        ACQUIRE(customeMiningLock);
+                        customMessageCount = 2048 + customMessageCount;
+                        RELEASE(customeMiningLock);
+                    }
                 }
                 else
                 {
@@ -5688,6 +5701,15 @@ static void deinitialize()
 
 static void logInfo()
 {
+    unsigned long long customCount = 0;
+    ACQUIRE(customeMiningLock);
+    customCount = customMessageCount;
+    RELEASE(customeMiningLock);
+
+    setText(message, L"Custom message count: ");
+    appendNumber(message, customCount, TRUE);
+    logToConsole(message);
+
     unsigned long long numberOfWaitingBytes = 0;
 
     for (unsigned int i = 0; i < NUMBER_OF_OUTGOING_CONNECTIONS + NUMBER_OF_INCOMING_CONNECTIONS; i++)
