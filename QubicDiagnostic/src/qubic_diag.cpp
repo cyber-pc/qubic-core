@@ -4,7 +4,7 @@
 
 static volatile char logMessageLock = 0;
 
-#include "../../src/platform/time.h"
+//#include "../../src/platform/time.h"
 #include "../../src/platform/file_io.h"
 #include "../../src/platform/time_stamp_counter.h"
 #include "../../src/platform/concurrency.h"
@@ -17,7 +17,7 @@ static volatile char logMessageLock = 0;
 #include "../../src/four_q.h"
 
 // Change the number of processors use for testing
-#define NUMBER_TEST_PROCESSORS 16
+#define NUMBER_TEST_PROCESSORS 4
 
 
 #define LOOP_COUNT_TEST 10000
@@ -67,26 +67,42 @@ enum TestName
     WRITE_LARGE_FILE,
     READ_FILE,
     READ_LARGE_FILE,
+
     ASYNC_WRITE_FILE,
     ASYNC_WRITE_LARGE_FILE,
     ASYNC_BLOCKING_WRITE_FILE,
     ASYNC_BLOCKING_WRITE_LARGE_FILE,
     ASYNC_READ_FILE,
     ASYNC_READ_LARGE_FILE,
+
+    ITEM_LIMIT_ASYNC_WRITE_FILE,
+    ITEM_LIMIT_ASYNC_WRITE_LARGE_FILE,
+    ITEM_LIMIT_ASYNC_BLOCKING_WRITE_FILE,
+    ITEM_LIMIT_ASYNC_BLOCKING_WRITE_LARGE_FILE,
+    ITEM_LIMIT_ASYNC_READ_FILE,
+    ITEM_LIMIT_ASYNC_READ_LARGE_FILE,
     MAX_TEST
 };
 
 static unsigned int gTestCases[] = {
-    WRITE_FILE,
-    WRITE_LARGE_FILE,
-    READ_FILE,
-    READ_LARGE_FILE,
-    ASYNC_WRITE_FILE,
-    ASYNC_WRITE_LARGE_FILE,
-    ASYNC_BLOCKING_WRITE_FILE,
-    ASYNC_BLOCKING_WRITE_LARGE_FILE,
-    ASYNC_READ_FILE,
-    ASYNC_READ_LARGE_FILE
+    //WRITE_FILE,
+    //WRITE_LARGE_FILE,
+    //READ_FILE,
+    //READ_LARGE_FILE,
+
+    //ASYNC_WRITE_FILE,
+    //ASYNC_WRITE_LARGE_FILE,
+    //ASYNC_BLOCKING_WRITE_FILE,
+    //ASYNC_BLOCKING_WRITE_LARGE_FILE,
+    //ASYNC_READ_FILE,
+    //ASYNC_READ_LARGE_FILE,
+
+    ITEM_LIMIT_ASYNC_WRITE_FILE,
+    ITEM_LIMIT_ASYNC_WRITE_LARGE_FILE,
+    ITEM_LIMIT_ASYNC_BLOCKING_WRITE_FILE,
+    ITEM_LIMIT_ASYNC_BLOCKING_WRITE_LARGE_FILE,
+    ITEM_LIMIT_ASYNC_READ_FILE,
+    ITEM_LIMIT_ASYNC_READ_LARGE_FILE,
 };
 static CHAR16 gTestCasesString[MAX_TEST][256];
 
@@ -96,22 +112,22 @@ static SaveFileTestData* saveFileTestDataBuffer;
 
 static void logToConsole(const CHAR16* message)
 {
-    timestampedMessage[0] = (utcTime.Year % 100) / 10 + L'0';
-    timestampedMessage[1] = utcTime.Year % 10 + L'0';
-    timestampedMessage[2] = utcTime.Month / 10 + L'0';
-    timestampedMessage[3] = utcTime.Month % 10 + L'0';
-    timestampedMessage[4] = utcTime.Day / 10 + L'0';
-    timestampedMessage[5] = utcTime.Day % 10 + L'0';
-    timestampedMessage[6] = utcTime.Hour / 10 + L'0';
-    timestampedMessage[7] = utcTime.Hour % 10 + L'0';
-    timestampedMessage[8] = utcTime.Minute / 10 + L'0';
-    timestampedMessage[9] = utcTime.Minute % 10 + L'0';
-    timestampedMessage[10] = utcTime.Second / 10 + L'0';
-    timestampedMessage[11] = utcTime.Second % 10 + L'0';
-    timestampedMessage[12] = ' ';
-    timestampedMessage[13] = 0;
+    //timestampedMessage[0] =  L'0';//(utcTime.Year % 100) / 10 + L'0';
+    //timestampedMessage[1] =  L'0';//utcTime.Year % 10 + L'0';
+    //timestampedMessage[2] =  L'0';//utcTime.Month / 10 + L'0';
+    //timestampedMessage[3] =  L'0';//utcTime.Month % 10 + L'0';
+    //timestampedMessage[4] =  L'0';//utcTime.Day / 10 + L'0';
+    //timestampedMessage[5] =  L'0';//utcTime.Day % 10 + L'0';
+    //timestampedMessage[6] =  L'0';//utcTime.Hour / 10 + L'0';
+    //timestampedMessage[7] =  L'0';//utcTime.Hour % 10 + L'0';
+    //timestampedMessage[8] =  L'0';//utcTime.Minute / 10 + L'0';
+    //timestampedMessage[9] =  L'0';//utcTime.Minute % 10 + L'0';
+    //timestampedMessage[10] = L'0';//utcTime.Second / 10 + L'0';
+    //timestampedMessage[11] = L'0';//utcTime.Second % 10 + L'0';
+    //timestampedMessage[12] = ' ';
+    //timestampedMessage[13] = 0;
 
-    appendText(timestampedMessage, message);
+    setText(timestampedMessage, message);
     appendText(timestampedMessage, L"\r\n");
 
     outputStringToConsole(timestampedMessage);
@@ -162,12 +178,20 @@ static bool initTest()
     setText(gTestCasesString[WRITE_LARGE_FILE], L"WRITE_LARGE_FILE");
     setText(gTestCasesString[READ_FILE], L"READ_FILE");
     setText(gTestCasesString[READ_LARGE_FILE], L"READ_LARGE_FILE");
+
     setText(gTestCasesString[ASYNC_BLOCKING_WRITE_FILE], L"ASYNC_BLOCKING_WRITE_FILE");
     setText(gTestCasesString[ASYNC_BLOCKING_WRITE_LARGE_FILE], L"ASYNC_BLOCKING_WRITE_LARGE_FILE");
     setText(gTestCasesString[ASYNC_WRITE_FILE], L"ASYNC_WRITE_FILE");
     setText(gTestCasesString[ASYNC_WRITE_LARGE_FILE], L"ASYNC_WRITE_LARGE_FILE");
     setText(gTestCasesString[ASYNC_READ_FILE], L"ASYNC_READ_FILE");
     setText(gTestCasesString[ASYNC_READ_LARGE_FILE], L"ASYNC_READ_LARGE_FILE");
+
+    setText(gTestCasesString[ITEM_LIMIT_ASYNC_BLOCKING_WRITE_FILE], L"ITEM_LIMIT_ASYNC_BLOCKING_WRITE_FILE");
+    setText(gTestCasesString[ITEM_LIMIT_ASYNC_BLOCKING_WRITE_LARGE_FILE], L"ITEM_LIMIT_ASYNC_BLOCKING_WRITE_LARGE_FILE");
+    setText(gTestCasesString[ITEM_LIMIT_ASYNC_WRITE_FILE], L"ITEM_LIMIT_ASYNC_WRITE_FILE");
+    setText(gTestCasesString[ITEM_LIMIT_ASYNC_WRITE_LARGE_FILE], L"ITEM_LIMIT_ASYNC_WRITE_LARGE_FILE");
+    setText(gTestCasesString[ITEM_LIMIT_ASYNC_READ_FILE], L"ITEM_LIMIT_ASYNC_READ_FILE");
+    setText(gTestCasesString[ITEM_LIMIT_ASYNC_READ_LARGE_FILE], L"ITEM_LIMIT_ASYNC_READ_LARGE_FILE");
 
     if (!initSaveFileTest())
     {
@@ -620,9 +644,11 @@ bool prepareTest()
                 sts = runSaveLargeFile(id, false);
                 break;
             case ASYNC_READ_FILE:
+            case ITEM_LIMIT_ASYNC_READ_FILE:
                 sts = runSaveFile(id, false);
                 break;
             case ASYNC_READ_LARGE_FILE:
+            case ITEM_LIMIT_ASYNC_READ_LARGE_FILE:
                 sts = runSaveLargeFile(id, false);
                 break;
             default:
@@ -665,6 +691,7 @@ bool verifyResult()
             break;
         case ASYNC_WRITE_FILE:
         case ASYNC_BLOCKING_WRITE_FILE:
+        case ITEM_LIMIT_ASYNC_BLOCKING_WRITE_FILE:
             allTestPass = verifyWriteResult(true);
             break;
         case WRITE_LARGE_FILE:
@@ -672,6 +699,8 @@ bool verifyResult()
             break;
         case ASYNC_WRITE_LARGE_FILE:
         case ASYNC_BLOCKING_WRITE_LARGE_FILE:
+        case ITEM_LIMIT_ASYNC_WRITE_LARGE_FILE:
+        case ITEM_LIMIT_ASYNC_BLOCKING_WRITE_LARGE_FILE:
             allTestPass = verifyLargeFileWriteResult(true);
             break;
         case READ_FILE:
@@ -681,9 +710,11 @@ bool verifyResult()
             allTestPass = verifyLargeFileWriteResult(true);
             break;
         case ASYNC_READ_FILE:
+        case ITEM_LIMIT_ASYNC_READ_FILE:
             allTestPass = verifyWriteResult(true);
             break;
         case ASYNC_READ_LARGE_FILE:
+        case ITEM_LIMIT_ASYNC_READ_LARGE_FILE:
             allTestPass = verifyLargeFileWriteResult(true);
             break;
         default:
@@ -729,15 +760,19 @@ void threadRun(void* processId)
             testResult = runSaveLargeFile(id, false);
             break;
         case ASYNC_WRITE_FILE:
+        case ITEM_LIMIT_ASYNC_WRITE_FILE:
             testResult = runSaveFile(id, true, false);
             break;
         case ASYNC_WRITE_LARGE_FILE:
+        case ITEM_LIMIT_ASYNC_WRITE_LARGE_FILE:
             testResult = runSaveLargeFile(id, true, false);
             break;
         case ASYNC_BLOCKING_WRITE_FILE:
+        case ITEM_LIMIT_ASYNC_BLOCKING_WRITE_FILE:
             testResult = runSaveFile(id, true, true);
             break;
         case ASYNC_BLOCKING_WRITE_LARGE_FILE:
+        case ITEM_LIMIT_ASYNC_BLOCKING_WRITE_LARGE_FILE:
             testResult = runSaveLargeFile(id, true, true);
             break;
         case READ_FILE:
@@ -747,9 +782,11 @@ void threadRun(void* processId)
             testResult = runReadLargeFile(id, false);
             break;
         case ASYNC_READ_FILE:
+        case ITEM_LIMIT_ASYNC_READ_FILE:
             testResult = runReadFile(id, true);
             break;
         case ASYNC_READ_LARGE_FILE:
+        case ITEM_LIMIT_ASYNC_READ_LARGE_FILE:
             testResult = runReadLargeFile(id, true);
             break;
         default:
@@ -835,7 +872,7 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
 
     bs->SetWatchdogTimer(0, 0, 0, NULL);
 
-    initTime();
+    //initTime();
 
     st->ConOut->ClearScreen(st->ConOut);
     setText(message, L"Qubic ");
@@ -910,11 +947,12 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
         }
 
 
-        if (!initFilesystem(gpServicesProtocol))
+        if (!initFilesystem())
         {
             logToConsole(L"Init filesystem failed!");
             return EFI_ABORTED;
         }
+        registerAsynFileIO(gpServicesProtocol);
 
 
         // Init test
@@ -985,18 +1023,36 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
                 threadRun(&bsProcID);
 
                 // Wait for all task is done
+                bool flushItemGradually = false;
+                if (gCurrentTestCase == ITEM_LIMIT_ASYNC_WRITE_FILE ||
+                    gCurrentTestCase == ITEM_LIMIT_ASYNC_WRITE_LARGE_FILE ||
+                    gCurrentTestCase == ITEM_LIMIT_ASYNC_BLOCKING_WRITE_FILE ||
+                    gCurrentTestCase == ITEM_LIMIT_ASYNC_BLOCKING_WRITE_LARGE_FILE ||
+                    gCurrentTestCase == ITEM_LIMIT_ASYNC_READ_FILE ||
+                    gCurrentTestCase == ITEM_LIMIT_ASYNC_READ_LARGE_FILE)
+                {
+                    flushItemGradually = true;
+                }
+
                 logToConsole(L"  - Waiting for all tasks done...");
                 unsigned long long startTick = __rdtsc();
                 int readyCount = 0;
                 while (readyCount < gNumberOfAllProcessors)
                 {
                     // Don't flush right away. Wait sometimes for simulate
-                    unsigned long long waitingTimeInMs = (__rdtsc() - startTick) * 1000 / frequency;
-                    if (waitingTimeInMs > 30000)
+                    if (!flushItemGradually)
                     {
-                        logToConsole(L"  - Flusing the buffer ...");
-                        startTick = __rdtsc();
-                        flushAsyncFileIOBuffer();
+                        unsigned long long waitingTimeInMs = (__rdtsc() - startTick) * 1000 / frequency;
+                        if (waitingTimeInMs > 3000)
+                        {
+                            logToConsole(L"  - Flusing the buffer ...");
+                            startTick = __rdtsc();
+                            flushAsyncFileIOBuffer();
+                        }
+                    }
+                    else
+                    {
+                        flushAsyncFileIOBuffer(2);
                     }
 
                     readyCount = 0;
@@ -1011,6 +1067,14 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
                             readyCount++;
                         }
                     }
+                }
+
+                // Non-blocking mode need to flush all at the end
+                if (gCurrentTestCase == ITEM_LIMIT_ASYNC_WRITE_FILE ||
+                    gCurrentTestCase == ITEM_LIMIT_ASYNC_WRITE_LARGE_FILE
+                    )
+                {
+                    flushAsyncFileIOBuffer();
                 }
 
                 // Close all events
