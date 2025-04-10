@@ -147,14 +147,26 @@ void writeCustomMiningRevToCSV(const std::string& output_file, const CustomMinin
     std::cout << "CSV written to: " << output_file << std::endl;
 }
 
-int main()
+int main(int argc, char* argv[])
 {
+    std::string inputFile, outputFile;
+    if (argc != 3)
+    {
+        printf("Usage:   revenue_calculator [custom_revenue.eoe] [custom_revenue.csv] \n");
+        return 1;
+    }
+    else
+    {
+        inputFile = argv[1];
+        outputFile = argv[2];
+    }
+
     CustomMiningRev custom_mining_rev;
-    readCustomMiningRev("custom_revenue_2.eoe", custom_mining_rev);
+    readCustomMiningRev(inputFile, custom_mining_rev);
 
     custom_mining_rev.revFormula();
 
-    writeCustomMiningRevToCSV("custom_revenue_2.csv", custom_mining_rev);
+    writeCustomMiningRevToCSV(outputFile, custom_mining_rev);
 
     return 0;
 }
