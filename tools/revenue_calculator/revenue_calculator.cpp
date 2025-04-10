@@ -82,7 +82,7 @@ struct CustomMiningRev
         // Formula: newScore =  vote_count * tx * customMiningShare = revenueOldScore * customMiningShare
         for (unsigned short computorIndex = 0; computorIndex < NUMBER_OF_COMPUTORS; computorIndex++)
         {
-            unsigned long long shareCoutn = customMiningShareCount[computorIndex] > 0 ? customMiningShareCount[computorIndex] : 1;
+            unsigned long long shareCoutn = customMiningShareCount[computorIndex];
             customMiningScore[computorIndex] = revenueOldScore[computorIndex] * shareCoutn;
         }
 
