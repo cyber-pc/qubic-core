@@ -1023,28 +1023,138 @@ public:
 
 };
 
-volatile static char accumulatedSharedCountLock = 0;
-volatile static char gSystemCustomMiningSolutionLock = 0;
-volatile static char gCustomMiningCacheLock = 0;
-unsigned long long gSystemCustomMiningSolutionCount = 0;
-unsigned long long gSystemCustomMiningDuplicatedSolutionCount = 0;
-unsigned long long gSystemCustomMiningSolutionOFCount = 0;
-static volatile char gCustomMiningSharesCountLock = 0;
+// Stats of custom mining.
+// Reset after epoch change.
+// Some variable is reset after end of each custom mining phase.
+struct CustomMiningStats
+{
+    // Reset per epoch
+    struct Computor
+    {
+        long long total;   // total shares of a computors = unverifed + valid + invalid
+        long long valid;   // valid shares of a computors
+        long long invalid; // invalid shares of a computors
+    } sharePerComputor[NUMBER_OF_COMPUTORS];
+
+    // 
+    struct Counter
+    {
+        // task related
+        long long tasks;
+
+        // Shares related
+        long long shares; // Total shares/solutions = unverifed/no-task + valid + invalid
+        long long valid;
+        long long inValid;
+        long long duplicated;
+
+        void reset()
+        {
+            ATOMIC_STORE64(tasks, 0);
+
+            ATOMIC_STORE64(shares, 0);
+            ATOMIC_STORE64(valid, 0);
+            ATOMIC_STORE64(inValid, 0);
+            ATOMIC_STORE64(duplicated, 0);
+        }
+    };
+
+    // Stats of current epoch until last custom mining phase end
+    Counter lastPhases;
+    long long maxOverflowShareCount; // Max number of shares that exceed the data packed in transaction
+    long long maxCollisionShareCount; // Max number of shares that are not save in cached because of collision
+
+    // Stats of current custom mining phase
+    Counter phase;
+
+    // Asume at begining of epoch.
+    void epochReset()
+    {
+        lastPhases.reset();
+        phase.reset();
+        setMem(sharePerComputor, sizeof(sharePerComputor), 0);
+
+        ATOMIC_STORE64(maxOverflowShareCount, 0);
+        ATOMIC_STORE64(maxCollisionShareCount, 0);
+    }
+
+    // At the end of phase. Ussually the task/sols message still arrive
+    void phaseResetAndEpochAccumulate()
+    {
+        // Load the phase stats
+        const long long tasks = ATOMIC_LOAD64(phase.tasks);
+        const long long shares = ATOMIC_LOAD64(phase.shares);
+        const long long valid = ATOMIC_LOAD64(phase.valid);
+        const long long inValid = ATOMIC_LOAD64(phase.inValid);
+        const long long duplicated = ATOMIC_LOAD64(phase.duplicated);
+
+        // Accumulate the phase
+        ATOMIC_ADD64(lastPhases.tasks, tasks);
+        ATOMIC_ADD64(lastPhases.shares, shares);
+        ATOMIC_ADD64(lastPhases.valid, valid);
+        ATOMIC_ADD64(lastPhases.inValid, inValid);
+        ATOMIC_ADD64(lastPhases.duplicated, duplicated);
+
+        // Reset phase number
+        phase.reset();
+    }
+
+    void appendLog(CHAR16* message)
+    {
+        long long customMiningTasks = ATOMIC_LOAD64(phase.tasks);
+        long long customMiningShares = ATOMIC_LOAD64(phase.shares);
+        long long customMiningInvalidShares = ATOMIC_LOAD64(phase.inValid);
+        long long customMiningValidShares = ATOMIC_LOAD64(phase.valid);
+        long long customMiningDuplicated = ATOMIC_LOAD64(phase.duplicated);
+
+        appendText(message, L"CurrentPhase:");
+        appendText(message, L" Tasks: ");
+        appendNumber(message, customMiningTasks, true);
+        appendText(message, L" | Shares: ");
+        appendNumber(message, customMiningShares, true);
+        appendText(message, L" | Valid: ");
+        appendNumber(message, customMiningValidShares, true);
+        appendText(message, L" | InValid: ");
+        appendNumber(message, customMiningInvalidShares, true);
+        appendText(message, L" | Duplicated: ");
+        appendNumber(message, customMiningDuplicated, true);
+
+        customMiningTasks = ATOMIC_LOAD64(lastPhases.tasks);
+        customMiningShares = ATOMIC_LOAD64(lastPhases.shares);
+        customMiningInvalidShares = ATOMIC_LOAD64(lastPhases.inValid);
+        customMiningValidShares = ATOMIC_LOAD64(lastPhases.valid);
+        customMiningDuplicated = ATOMIC_LOAD64(lastPhases.duplicated);
+
+        appendText(message, L". LastPhases:");
+        appendText(message, L" Tasks: ");
+        appendNumber(message, customMiningTasks, false);
+        appendText(message, L" | Shares: ");
+        appendNumber(message, customMiningShares, false);
+        appendText(message, L" | Valid: ");
+        appendNumber(message, customMiningValidShares, false);
+        appendText(message, L" | Invalid: ");
+        appendNumber(message, customMiningInvalidShares, false);
+        appendText(message, L" | Duplicated: ");
+        appendNumber(message, customMiningDuplicated, false);
+
+        long long customMiningShareMaxOFCount = ATOMIC_LOAD64(maxOverflowShareCount);
+        long long customMiningSharesMaxCollision = ATOMIC_LOAD64(maxCollisionShareCount);
+        appendText(message, L". Anomaly:");
+        appendText(message, L" Overflow: ");
+        appendNumber(message, customMiningShareMaxOFCount, false);
+        appendText(message, L" | Collision: ");
+        appendNumber(message, customMiningSharesMaxCollision, false);
+    }
+};
+
 static char gIsInCustomMiningState = 0;
 static volatile char gIsInCustomMiningStateLock = 0;
-static volatile char gCustomMiningInvalidSharesCountLock = 0;
-static unsigned long long gCustomMiningValidSharesCount = 0;
-static unsigned long long gCustomMiningInvalidSharesCount = 0;
 static volatile char gCustomMiningTaskStorageLock = 0;
 static volatile char gCustomMiningSolutionStorageLock = 0;
-static unsigned long long gTotalCustomMiningTaskMessages = 0;
-static unsigned long long gTotalCustomMiningSolutions = 0;
-static volatile char gTotalCustomMiningTaskMessagesLock = 0;
-static volatile char gTotalCustomMiningSolutionsLock = 0;
-static unsigned int gCustomMiningCountOverflow = 0;
-static volatile char gCustomMiningShareCountOverFlowLock = 0;
+static volatile char gCustomMiningCacheLock = 0;
 
-CustomMininingCache<CustomMiningSolutionCacheEntry, MAX_NUMBER_OF_CUSTOM_MINING_SOLUTIONS, 20> gSystemCustomMiningSolution;
+CustomMininingCache<CustomMiningSolutionCacheEntry, MAX_NUMBER_OF_CUSTOM_MINING_SOLUTIONS, 20> gCustomMiningSolutionsPhaseCache;
+CustomMiningStats gCustomMiningStats;
 
 #ifdef NO_UEFI
 #else
@@ -1055,7 +1165,7 @@ void saveCustomMiningCache(int epoch, CHAR16* directory = NULL)
     CUSTOM_MINING_CACHE_FILE_NAME[sizeof(CUSTOM_MINING_CACHE_FILE_NAME) / sizeof(CUSTOM_MINING_CACHE_FILE_NAME[0]) - 4] = epoch / 100 + L'0';
     CUSTOM_MINING_CACHE_FILE_NAME[sizeof(CUSTOM_MINING_CACHE_FILE_NAME) / sizeof(CUSTOM_MINING_CACHE_FILE_NAME[0]) - 3] = (epoch % 100) / 10 + L'0';
     CUSTOM_MINING_CACHE_FILE_NAME[sizeof(CUSTOM_MINING_CACHE_FILE_NAME) / sizeof(CUSTOM_MINING_CACHE_FILE_NAME[0]) - 2] = epoch % 10 + L'0';
-    gSystemCustomMiningSolution.save(CUSTOM_MINING_CACHE_FILE_NAME, directory);
+    gCustomMiningSolutionsPhaseCache.save(CUSTOM_MINING_CACHE_FILE_NAME, directory);
     RELEASE(gCustomMiningCacheLock);
 }
 
@@ -1067,7 +1177,7 @@ bool loadCustomMiningCache(int epoch)
     CUSTOM_MINING_CACHE_FILE_NAME[sizeof(CUSTOM_MINING_CACHE_FILE_NAME) / sizeof(CUSTOM_MINING_CACHE_FILE_NAME[0]) - 4] = epoch / 100 + L'0';
     CUSTOM_MINING_CACHE_FILE_NAME[sizeof(CUSTOM_MINING_CACHE_FILE_NAME) / sizeof(CUSTOM_MINING_CACHE_FILE_NAME[0]) - 3] = (epoch % 100) / 10 + L'0';
     CUSTOM_MINING_CACHE_FILE_NAME[sizeof(CUSTOM_MINING_CACHE_FILE_NAME) / sizeof(CUSTOM_MINING_CACHE_FILE_NAME[0]) - 2] = epoch % 10 + L'0';
-    success = gSystemCustomMiningSolution.load(CUSTOM_MINING_CACHE_FILE_NAME);
+    success = gCustomMiningSolutionsPhaseCache.load(CUSTOM_MINING_CACHE_FILE_NAME);
     RELEASE(gCustomMiningCacheLock);
     return success;
 }

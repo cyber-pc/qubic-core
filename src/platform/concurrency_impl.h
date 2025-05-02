@@ -75,3 +75,18 @@ void BusyWaitingTracker::pause()
 }
 
 #endif
+
+// Atomic max
+void atomicMax64(long long* dest, long long value)
+{
+    long long old = *dest;
+    while (value > old)
+    {
+        long long prev = _InterlockedCompareExchange64(dest, value, old);
+        if (prev == old)
+        {
+            break;
+        }
+        old = prev;
+    }
+}
