@@ -526,7 +526,8 @@ static void processBroadcastMessage(const unsigned long long processorNumber, Re
                 enqueueResponse(NULL, header);
             }
 
-            if (isZero(request->destinationPublicKey))
+            //if (isZero(request->destinationPublicKey))
+            if (0)
             {
                 const unsigned int messagePayloadSize = messageSize - sizeof(BroadcastMessage) - SIGNATURE_SIZE;
 
