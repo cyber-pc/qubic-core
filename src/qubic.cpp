@@ -526,8 +526,7 @@ static void processBroadcastMessage(const unsigned long long processorNumber, Re
                 enqueueResponse(NULL, header);
             }
 
-            //if (isZero(request->destinationPublicKey))
-            if (0)
+            if (isZero(request->destinationPublicKey))
             {
                 const unsigned int messagePayloadSize = messageSize - sizeof(BroadcastMessage) - SIGNATURE_SIZE;
 
@@ -539,6 +538,8 @@ static void processBroadcastMessage(const unsigned long long processorNumber, Re
 
                 if (messagePayloadSize == sizeof(CustomMiningTask) && request->sourcePublicKey == dispatcherPublicKey)
                 {
+                    addDebugMessage(L"[CustomMining] customMiningTaskBroadCast R");
+
                     // See CustomMiningTaskMessage structure
                     // MESSAGE_TYPE_CUSTOM_MINING_TASK
 
@@ -569,9 +570,13 @@ static void processBroadcastMessage(const unsigned long long processorNumber, Re
                             }
                         }
                     }
+
+                    addDebugMessage(L"[CustomMining] customMiningTaskBroadCast R DONE");
                 }
                 else if (messagePayloadSize == sizeof(CustomMiningSolution))
                 {
+                    addDebugMessage(L"[CustomMining] customMiningSolutionBroadCast R");
+
                     for (unsigned int i = 0; i < NUMBER_OF_COMPUTORS; i++)
                     {
                         if (request->sourcePublicKey == broadcastedComputors.computors.publicKeys[i])
@@ -644,6 +649,8 @@ static void processBroadcastMessage(const unsigned long long processorNumber, Re
                             break;
                         }
                     }
+
+                    addDebugMessage(L"[CustomMining] customMiningSolutionBroadCast R DONE");
                 }
                 
             }
@@ -3243,23 +3250,34 @@ static void processTick(unsigned long long processorNumber)
 
 static void resetCustomMining()
 {
+    addDebugMessage(L"[CustomMining] resetCustomMining");
     gCustomMiningSharesCounter.init();
+
+    addDebugMessage(L"[CustomMining] resetCustomMining gCustomMiningSharesCounter.init() DONE");
+
     setMem(gCustomMiningSharesCount, sizeof(gCustomMiningSharesCount), 0);
+
+    addDebugMessage(L"[CustomMining] resetCustomMining gCustomMiningSharesCount reset DONE");
 
     for (int i = 0; i < NUMBER_OF_TASK_PARTITIONS; i++)
     {
         gSystemCustomMiningSolutionCache[i].reset();
     }
+    addDebugMessage(L"[CustomMining] resetCustomMining gSystemCustomMiningSolutionCache reset DONE");
 
     for (int i = 0; i < NUMBER_OF_COMPUTORS; ++i)
     {
         // Initialize the broadcast transaction buffer. Assume the all previous is broadcasted.
         gCustomMiningBroadcastTxBuffer[i].isBroadcasted = true;
     }
+    addDebugMessage(L"[CustomMining] resetCustomMining gCustomMiningBroadcastTxBuffer reset DONE");
+
     gCustomMiningStorage.reset();
+    addDebugMessage(L"[CustomMining] resetCustomMining gCustomMiningStorage reset DONE");
 
     // Clear all data of epoch
     gCustomMiningStats.epochReset();
+    addDebugMessage(L"[CustomMining] resetCustomMining gCustomMiningStats epochReset DONE");
 }
 
 static void beginEpoch()

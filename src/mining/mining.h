@@ -1365,31 +1365,47 @@ int customMiningInitTaskPartitions()
 // Get computor ids
 int customMiningGetComputorID(unsigned int nonce, int partId)
 {
+    ASSERT(partId >= 0);
+    ASSERT(partId <NUMBER_OF_TASK_PARTITIONS );
+
     return nonce / gTaskPartition[partId].domainSize + gTaskPartition[partId].firstComputorIdx;
 }
 
 int customMiningInitialize()
 {
+    addDebugMessage(L"[CustomMining] customMiningInitialize R");
+
     gCustomMiningStorage.init();
+    addDebugMessage(L"[CustomMining] customMiningInitialize gCustomMiningStorage init DONE");
 #if SOLUTION_CACHE_DYNAMIC_MEM 
     allocPoolWithErrorLog(L"gSystemCustomMiningSolutionCache",
         NUMBER_OF_TASK_PARTITIONS * sizeof(CustomMininingCache<CustomMiningSolutionCacheEntry, MAX_NUMBER_OF_CUSTOM_MINING_SOLUTIONS, 20>),
         (void**)&gSystemCustomMiningSolutionCache,
         __LINE__);
 #endif
+
+    
+    addDebugMessage(L"[CustomMining] customMiningInitialize gSystemCustomMiningSolutionCache allocate DONE");
     setMem((unsigned char*)gSystemCustomMiningSolutionCache, NUMBER_OF_TASK_PARTITIONS * sizeof(CustomMininingCache<CustomMiningSolutionCacheEntry, MAX_NUMBER_OF_CUSTOM_MINING_SOLUTIONS, 20>), 0);
+
+    addDebugMessage(L"[CustomMining] customMiningInitialize gSystemCustomMiningSolutionCache setMem DONE");
     for (int i = 0; i < NUMBER_OF_TASK_PARTITIONS; i++)
     {
         gSystemCustomMiningSolutionCache[i].init();
     }
 
+    addDebugMessage(L"[CustomMining] customMiningInitialize gSystemCustomMiningSolutionCache init DONE");
+
     customMiningInitTaskPartitions();
+
+    addDebugMessage(L"[CustomMining] customMiningInitialize R DONE");
 
     return 0;
 }
 
 int customMiningDeinitialize()
 {
+    addDebugMessage(L"[CustomMining] customMiningDeinitialize R");
 #if SOLUTION_CACHE_DYNAMIC_MEM 
     if (gSystemCustomMiningSolutionCache)
     {
@@ -1398,6 +1414,8 @@ int customMiningDeinitialize()
     }
 #endif
     gCustomMiningStorage.deinit();
+
+    addDebugMessage(L"[CustomMining] customMiningDeinitialize R DONE ");
     return 0;
 }
 
