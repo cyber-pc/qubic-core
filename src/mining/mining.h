@@ -372,6 +372,7 @@ public:
     void getEntry(T& rData, unsigned int cacheIndex)
     {
         cacheIndex %= capacity();
+        ASSERT(cacheIndex < sizeof(cache) / sizeof(cache[0]));
         ACQUIRE(lock);
         rData = cache[cacheIndex];
         RELEASE(lock);
@@ -386,6 +387,7 @@ public:
         ACQUIRE(lock);
         for (unsigned int i = 0; i < collisionRetries; ++i)
         {
+            ASSERT(tryFetchIdx < sizeof(cache) / sizeof(cache[0]));
             const T& cacheData = cache[tryFetchIdx];
             if (cacheData.isEmpty())
             {
@@ -431,6 +433,7 @@ public:
         ACQUIRE(lock);
         for (unsigned int i = 0; i < collisionRetries; ++i)
         {
+            ASSERT(tryFetchIdx < sizeof(cache) / sizeof(cache[0]));
             const T& cacheData = cache[tryFetchIdx];
             if (cacheData.isEmpty())
             {
@@ -454,6 +457,7 @@ public:
         }
         if (retVal == updateCondition)
         {
+            ASSERT(tryFetchIdx < sizeof(cache) / sizeof(cache[0]));
             cache[tryFetchIdx] = rData;
         }
         RELEASE(lock);
@@ -472,6 +476,7 @@ public:
     void addEntry(const T& rData, unsigned int cacheIndex)
     {
         cacheIndex %= capacity();
+        ASSERT(cacheIndex < sizeof(cache) / sizeof(cache[0]));
         ACQUIRE(lock);
         cache[cacheIndex] = rData;
         RELEASE(lock);
@@ -621,6 +626,8 @@ public:
         // This will avoid them spawning invalid solutions without verification
         if (!_isHashed)
         {
+            static_assert(sizeof(_buffer) == (sizeof(_solution.taskIndex) + sizeof(_solution.nonce)), "Buffer size is incorrect.");
+
             copyMem(_buffer, &_solution.taskIndex, sizeof(_solution.taskIndex));
             copyMem(_buffer + sizeof(_solution.taskIndex), &_solution.nonce, sizeof(_solution.nonce));
             KangarooTwelve(_buffer, sizeof(_solution.taskIndex) + sizeof(_solution.nonce), &_digest, sizeof(_digest));
@@ -888,6 +895,9 @@ public:
         while (left <= right && left < _storageIndex)
         {
             unsigned long long mid = (left + right) / 2;
+
+            ASSERT(mid < sizeof(_indices) / sizeof(_indices[0]));
+            ASSERT(_indices[mid] < sizeof(_data) / sizeof(_data[0]));
             unsigned long long midTaskIndex = _data[_indices[mid]].taskIndex;
 
             if (midTaskIndex == taskIndex)
@@ -916,6 +926,9 @@ public:
         {
             while (result > 0)
             {
+                ASSERT(result - 1 < sizeof(_indices) / sizeof(_indices[0]));
+                ASSERT(_indices[result - 1] < sizeof(_data) / sizeof(_data[0]));
+
                 if (taskIndex == _data[_indices[result - 1]].taskIndex)
                 {
                     result--;
@@ -982,6 +995,9 @@ public:
         while (left <= right && left < _storageIndex)
         {
             unsigned long long mid = (left + right) / 2;
+            ASSERT(mid < sizeof(_indices) / sizeof(_indices[0]));
+            ASSERT(_indices[mid] < sizeof(_data) / sizeof(_data[0]));
+
             if (_data[_indices[mid]].taskIndex < pData->taskIndex)
             {
                 left = mid + 1;
@@ -993,6 +1009,8 @@ public:
             }
         }
         insertPos = left;
+        ASSERT(insertPos < sizeof(_indices) / sizeof(_indices[0]));
+        ASSERT(_storageIndex < sizeof(_indices) / sizeof(_indices[0]));
 
         // Shift indices right
         for (unsigned long long i = _storageIndex; i > insertPos; --i)
@@ -1013,6 +1031,10 @@ public:
         {
             return NULL;
         }
+
+        ASSERT(index < sizeof(_indices) / sizeof(_indices[0]));
+        ASSERT(_indices[index] < sizeof(_data) / sizeof(_data[0]));
+
         return &_data[_indices[index]];
     }
 
