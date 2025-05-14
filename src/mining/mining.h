@@ -837,18 +837,37 @@ public:
         DATA_EXISTED = 1,
         BUFFER_FULL = 2,
         UNKNOWN_ERROR = 3,
+        FAILED_TO_ALLOCATED = 4,
     };
-    void init()
+
+    int init()
     {
-        allocPoolWithErrorLog(L"CustomMiningSortedStorageData", maxItems * sizeof(DataType), (void**)&_data, __LINE__);
-        allocPoolWithErrorLog(L"CustomMiningSortedStorageIndices", maxItems * sizeof(unsigned long long), (void**)&_indices, __LINE__);
+        bool initStatus = true;
+        initStatus = allocPoolWithErrorLog(L"CustomMiningSortedStorageData", maxItems * sizeof(DataType), (void**)&_data, __LINE__);
+        if (!initStatus)
+        {
+            return FAILED_TO_ALLOCATED;
+        }
+
+        initStatus = allocPoolWithErrorLog(L"CustomMiningSortedStorageIndices", maxItems * sizeof(unsigned long long), (void**)&_indices, __LINE__);
+        if (!initStatus)
+        {
+            return FAILED_TO_ALLOCATED;
+        }
+
         _storageIndex = 0;
 
         // Buffer allocation for each processors. It is limited to 10MB each
         for (unsigned int i = 0; i < MAX_NUMBER_OF_PROCESSORS; i++)
         {
-            allocPoolWithErrorLog(L"CustomMiningSortedStorageProcBuffer", CUSTOM_MINING_STORAGE_PROCESSOR_MAX_STORAGE, (void**)&_dataBuffer[i], __LINE__);
+            initStatus = allocPoolWithErrorLog(L"CustomMiningSortedStorageProcBuffer", CUSTOM_MINING_STORAGE_PROCESSOR_MAX_STORAGE, (void**)&_dataBuffer[i], __LINE__);
+            if (!initStatus)
+            {
+                return FAILED_TO_ALLOCATED;
+            }
         }
+
+        return OK;
     }
 
     void deinit()
@@ -888,6 +907,10 @@ public:
         while (left <= right && left < _storageIndex)
         {
             unsigned long long mid = (left + right) / 2;
+
+            ASSERT(mid < maxItems);
+            ASSERT(_indices[mid] < maxItems);
+
             unsigned long long midTaskIndex = _data[_indices[mid]].taskIndex;
 
             if (midTaskIndex == taskIndex)
@@ -916,6 +939,9 @@ public:
         {
             while (result > 0)
             {
+                ASSERT(result - 1 < maxItems);
+                ASSERT(_indices[result - 1] < maxItems);
+
                 if (taskIndex == _data[_indices[result - 1]].taskIndex)
                 {
                     result--;
@@ -972,6 +998,7 @@ public:
         {
             return BUFFER_FULL;
         }
+        ASSERT(_storageIndex < maxItems);
 
         unsigned long long newIndex = _storageIndex;
         _data[newIndex] = *pData;
@@ -982,6 +1009,9 @@ public:
         while (left <= right && left < _storageIndex)
         {
             unsigned long long mid = (left + right) / 2;
+            ASSERT(mid < maxItems);
+            ASSERT(_indices[mid] < maxItems);
+
             if (_data[_indices[mid]].taskIndex < pData->taskIndex)
             {
                 left = mid + 1;
@@ -1000,6 +1030,8 @@ public:
             _indices[i] = _indices[i - 1];
         }
 
+        ASSERT(insertPos < maxItems);
+
         _indices[insertPos] = newIndex;
         _storageIndex++;
 
@@ -1013,6 +1045,10 @@ public:
         {
             return NULL;
         }
+        ASSERT(index < maxItems);
+        ASSERT(_indices[index] < maxItems);
+
+
         return &_data[_indices[index]];
     }
 
@@ -1081,6 +1117,7 @@ public:
 
         // Pack data into respond
         respondTaskCount = (maxReturnItems < respondTaskCount) ? maxReturnItems : respondTaskCount;
+        ASSERT(respondTaskCount * sizeof(DataType) < remainedSize);
         for (unsigned long long i = 0; i < respondTaskCount; i++, pData += sizeof(DataType))
         {
             unsigned long long index = startIndex + i;
