@@ -1424,6 +1424,7 @@ int customMiningDeinitialize()
 // Save score cache to SCORE_CACHE_FILE_NAME
 void saveCustomMiningCache(int epoch, CHAR16* directory = NULL)
 {
+    return;
     logToConsole(L"Saving custom mining cache file...");
     CUSTOM_MINING_CACHE_FILE_NAME[sizeof(CUSTOM_MINING_CACHE_FILE_NAME) / sizeof(CUSTOM_MINING_CACHE_FILE_NAME[0]) - 4] = epoch / 100 + L'0';
     CUSTOM_MINING_CACHE_FILE_NAME[sizeof(CUSTOM_MINING_CACHE_FILE_NAME) / sizeof(CUSTOM_MINING_CACHE_FILE_NAME[0]) - 3] = (epoch % 100) / 10 + L'0';
@@ -1440,6 +1441,7 @@ void saveCustomMiningCache(int epoch, CHAR16* directory = NULL)
 // Update score cache filename with epoch and try to load file
 bool loadCustomMiningCache(int epoch)
 {
+    return success;
     logToConsole(L"Loading custom mining cache...");
     bool success = true;
     CUSTOM_MINING_CACHE_FILE_NAME[sizeof(CUSTOM_MINING_CACHE_FILE_NAME) / sizeof(CUSTOM_MINING_CACHE_FILE_NAME[0]) - 4] = epoch / 100 + L'0';
