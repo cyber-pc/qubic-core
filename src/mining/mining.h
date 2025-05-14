@@ -896,8 +896,8 @@ public:
         {
             unsigned long long mid = (left + right) / 2;
 
-            ASSERT(mid < sizeof(_indices) / sizeof(_indices[0]));
-            ASSERT(_indices[mid] < sizeof(_data) / sizeof(_data[0]));
+            ASSERT(mid < maxItems);
+            ASSERT(_indices[mid] < maxItems);
             unsigned long long midTaskIndex = _data[_indices[mid]].taskIndex;
 
             if (midTaskIndex == taskIndex)
@@ -926,8 +926,8 @@ public:
         {
             while (result > 0)
             {
-                ASSERT(result - 1 < sizeof(_indices) / sizeof(_indices[0]));
-                ASSERT(_indices[result - 1] < sizeof(_data) / sizeof(_data[0]));
+                ASSERT(result - 1 < maxItems);
+                ASSERT(_indices[result - 1] < maxItems);
 
                 if (taskIndex == _data[_indices[result - 1]].taskIndex)
                 {
@@ -995,8 +995,8 @@ public:
         while (left <= right && left < _storageIndex)
         {
             unsigned long long mid = (left + right) / 2;
-            ASSERT(mid < sizeof(_indices) / sizeof(_indices[0]));
-            ASSERT(_indices[mid] < sizeof(_data) / sizeof(_data[0]));
+            ASSERT(mid < maxItems);
+            ASSERT(_indices[mid] < maxItems);
 
             if (_data[_indices[mid]].taskIndex < pData->taskIndex)
             {
@@ -1009,8 +1009,8 @@ public:
             }
         }
         insertPos = left;
-        ASSERT(insertPos < sizeof(_indices) / sizeof(_indices[0]));
-        ASSERT(_storageIndex < sizeof(_indices) / sizeof(_indices[0]));
+        ASSERT(insertPos < maxItems);
+        ASSERT(_storageIndex < maxItems);
 
         // Shift indices right
         for (unsigned long long i = _storageIndex; i > insertPos; --i)
@@ -1032,8 +1032,8 @@ public:
             return NULL;
         }
 
-        ASSERT(index < sizeof(_indices) / sizeof(_indices[0]));
-        ASSERT(_indices[index] < sizeof(_data) / sizeof(_data[0]));
+        ASSERT(index < maxItems);
+        ASSERT(_indices[index] < maxItems);
 
         return &_data[_indices[index]];
     }
