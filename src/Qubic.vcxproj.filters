@@ -282,6 +282,9 @@
     <ClInclude Include="contracts\RandomLottery.h">
       <Filter>contracts</Filter>
     </ClInclude>
+    <ClInclude Include="mining\score_engine.h">
+      <Filter>mining</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="platform">
