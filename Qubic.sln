@@ -32,8 +32,8 @@ Global
 		{E9E8E69C-FEA5-4643-9766-0E464A7100D1}.Debug|x64.Build.0 = Debug|x64
 		{E9E8E69C-FEA5-4643-9766-0E464A7100D1}.Release|x64.ActiveCfg = Release|x64
 		{E9E8E69C-FEA5-4643-9766-0E464A7100D1}.Release|x64.Build.0 = Release|x64
-		{E9E8E69C-FEA5-4643-9766-0E464A7100D1}.ReleaseAVX512|x64.ActiveCfg = Release|x64
-		{E9E8E69C-FEA5-4643-9766-0E464A7100D1}.ReleaseAVX512|x64.Build.0 = Release|x64
+		{E9E8E69C-FEA5-4643-9766-0E464A7100D1}.ReleaseAVX512|x64.ActiveCfg = ReleaseAVX512|x64
+		{E9E8E69C-FEA5-4643-9766-0E464A7100D1}.ReleaseAVX512|x64.Build.0 = ReleaseAVX512|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

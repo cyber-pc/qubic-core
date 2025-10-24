@@ -17,12 +17,12 @@ static volatile char logMessageLock = 0;
 #include "../../src/four_q.h"
 
 // Change the number of processors use for testing
-#define NUMBER_TEST_PROCESSORS 16
+#define NUMBER_TEST_PROCESSORS 8
 
 
 #define LOOP_COUNT_TEST 10000
 #define LOOP_COUNT_TEST_SMALL 1000
-#define MAX_NUMBER_TEST_PROCESSORS 32
+#define MAX_NUMBER_TEST_PROCESSORS 256
 static constexpr unsigned long long MEM_BUFFER_SIZE = 52ULL * 1024ULL * 1024ULL;
 typedef struct
 {
@@ -50,49 +50,46 @@ static char gProcessorReady[MAX_NUMBER_TEST_PROCESSORS];
 static char gProcessorResult[MAX_NUMBER_TEST_PROCESSORS];
 static unsigned long long gBSProc = 0;
 
-
-// For testing the scheduler save file
-struct SaveFileTestData
+struct
 {
-    // Reserve memories
-    unsigned int memBuffer[MEM_BUFFER_SIZE];
+    unsigned long long count;
+    unsigned long long totalProcessingTime; // ms
+    unsigned long long avgProcessingTime;
+    unsigned long long totalSizeInMB;
 
-    // Randomly parition of data for writing
-    unsigned long long dataPos[4][2];
-};
+    void reset()
+    {
+        count = 0;
+        totalProcessingTime = 0;
+        avgProcessingTime = 0;
+        totalSizeInMB = 0;
+    }
+
+} gProfiles[MAX_NUMBER_TEST_PROCESSORS];
 
 enum TestName
 {
-    WRITE_FILE = 0,
-    WRITE_LARGE_FILE,
-    READ_FILE,
-    READ_LARGE_FILE,
-    ASYNC_WRITE_FILE,
-    ASYNC_WRITE_LARGE_FILE,
-    ASYNC_BLOCKING_WRITE_FILE,
-    ASYNC_BLOCKING_WRITE_LARGE_FILE,
-    ASYNC_READ_FILE,
-    ASYNC_READ_LARGE_FILE,
+    MEMCPY_SINGLE_THREAD_ONE_CHUNK = 0,
+    MEMCPY_SINGLE_THREAD_FULL_COPY,
+    MEMCPY_SINGLE_THREAD_MANY_CHUNKS,
+
+    MEMCPY_MULTITHREADS_ONE_CHUNK,
+    MEMCPY_MULTITHREADS_MANY_CHUNKS,
+    MEMCPY_MULTITHREADS_MANY_CHUNKS_CONTINUOUS,
     MAX_TEST
 };
 
 static unsigned int gTestCases[] = {
-    WRITE_FILE,
-    WRITE_LARGE_FILE,
-    READ_FILE,
-    READ_LARGE_FILE,
-    ASYNC_WRITE_FILE,
-    ASYNC_WRITE_LARGE_FILE,
-    ASYNC_BLOCKING_WRITE_FILE,
-    ASYNC_BLOCKING_WRITE_LARGE_FILE,
-    ASYNC_READ_FILE,
-    ASYNC_READ_LARGE_FILE
+    MEMCPY_SINGLE_THREAD_ONE_CHUNK,
+    MEMCPY_SINGLE_THREAD_FULL_COPY,
+    MEMCPY_SINGLE_THREAD_MANY_CHUNKS,
+    MEMCPY_MULTITHREADS_ONE_CHUNK,
+    MEMCPY_MULTITHREADS_MANY_CHUNKS,
+    MEMCPY_MULTITHREADS_MANY_CHUNKS_CONTINUOUS,
 };
 static CHAR16 gTestCasesString[MAX_TEST][256];
 
 static unsigned int gCurrentTestCase = gTestCases[0];
-static SaveFileTestData* saveFileTestData[MAX_NUMBER_TEST_PROCESSORS];
-static SaveFileTestData* saveFileTestDataBuffer;
 
 static void logToConsole(const CHAR16* message)
 {
@@ -127,6 +124,18 @@ static void enableAVX()
         ));
 }
 
+static constexpr unsigned long long CHUNK_SIZE = (1ULL << 30);
+static constexpr unsigned long long MEMORY_REGIONS_COUNT = 32;
+static constexpr unsigned long long ITERATIONS = 32;
+
+unsigned char* gMemorySrc[MEMORY_REGIONS_COUNT] = { NULL };
+unsigned char* gMemoryDest[MEMORY_REGIONS_COUNT] = { NULL };
+
+unsigned char* gContinuousMemorySrc = NULL;
+unsigned char* gContinuousMemoryDst = NULL;
+unsigned long long gTestSizeInMB = 0;
+
+static_assert(CHUNK_SIZE % 8 == 0, "MEMORY_TEST_SIZE % 8 == 0");
 
 static bool initialize()
 {
@@ -137,15 +146,9 @@ static bool initialize()
     return true;
 }
 
-static bool initSaveFileTest()
+static bool initMemcpyTest()
 {
-    allocatePool(sizeof(SaveFileTestData), (void**)&saveFileTestDataBuffer);
-    setMem(saveFileTestDataBuffer, sizeof(SaveFileTestData), 0);
-    for (int i = 0; i < gNumberOfAllProcessors; i++)
-    {
-        allocatePool(sizeof(SaveFileTestData), (void**)&saveFileTestData[i]);
-        setMem(saveFileTestData[i], sizeof(SaveFileTestData), 0);
-    }
+
     return true;
 }
 
@@ -158,18 +161,14 @@ static bool initTest()
         gProcessorResult[i] = 0;
     }
 
-    setText(gTestCasesString[WRITE_FILE], L"WRITE_FILE");
-    setText(gTestCasesString[WRITE_LARGE_FILE], L"WRITE_LARGE_FILE");
-    setText(gTestCasesString[READ_FILE], L"READ_FILE");
-    setText(gTestCasesString[READ_LARGE_FILE], L"READ_LARGE_FILE");
-    setText(gTestCasesString[ASYNC_BLOCKING_WRITE_FILE], L"ASYNC_BLOCKING_WRITE_FILE");
-    setText(gTestCasesString[ASYNC_BLOCKING_WRITE_LARGE_FILE], L"ASYNC_BLOCKING_WRITE_LARGE_FILE");
-    setText(gTestCasesString[ASYNC_WRITE_FILE], L"ASYNC_WRITE_FILE");
-    setText(gTestCasesString[ASYNC_WRITE_LARGE_FILE], L"ASYNC_WRITE_LARGE_FILE");
-    setText(gTestCasesString[ASYNC_READ_FILE], L"ASYNC_READ_FILE");
-    setText(gTestCasesString[ASYNC_READ_LARGE_FILE], L"ASYNC_READ_LARGE_FILE");
+    setText(gTestCasesString[MEMCPY_SINGLE_THREAD_ONE_CHUNK], L"MEMCPY_SINGLE_THREAD_ONE_CHUNK");
+    setText(gTestCasesString[MEMCPY_SINGLE_THREAD_MANY_CHUNKS], L"MEMCPY_SINGLE_THREAD_MANY_CHUNKS");
+    setText(gTestCasesString[MEMCPY_MULTITHREADS_ONE_CHUNK], L"MEMCPY_MULTITHREADS_ONE_CHUNK");
+    setText(gTestCasesString[MEMCPY_MULTITHREADS_MANY_CHUNKS], L"MEMCPY_MULTITHREADS_MANY_CHUNKS");
+    setText(gTestCasesString[MEMCPY_MULTITHREADS_MANY_CHUNKS_CONTINUOUS], L"MEMCPY_MULTITHREADS_MANY_CHUNKS_CONTINUOUS"); 
+    setText(gTestCasesString[MEMCPY_SINGLE_THREAD_FULL_COPY], L"MEMCPY_SINGLE_THREAD_FULL_COPY");
 
-    if (!initSaveFileTest())
+    if (!initMemcpyTest())
     {
         return false;
     }
@@ -177,20 +176,32 @@ static bool initTest()
     return true;
 }
 
-static void deinitSaveFileTest()
+static void deinitMemcpyTest()
 {
-    freePool(saveFileTestDataBuffer);
-    for (int i = 0; i < gNumberOfAllProcessors; i++)
+    for (int i = 0; i < MEMORY_REGIONS_COUNT; i++)
     {
-        freePool(saveFileTestData[i]);
+        if (gMemorySrc[i] != NULL)
+        {
+            freePool(gMemorySrc[i]);
+        }
+        if (gMemoryDest[i] != NULL)
+        {
+            freePool(gMemoryDest[i]);
+        }
+    }
+    if (gContinuousMemorySrc != NULL)
+    {
+        freePool(gContinuousMemorySrc);
+    }
+    if (gContinuousMemoryDst != NULL)
+    {
+        freePool(gContinuousMemoryDst);
     }
 }
 
 static void deinitialize()
 {
-    deinitSaveFileTest();
-
-    deInitFileSystem();
+    deinitMemcpyTest();
 }
 
 inline static unsigned int random(const unsigned int range)
@@ -209,492 +220,324 @@ inline static unsigned long long random64(const unsigned long long range)
     return (value % range);
 }
 
-void generateDataPerId(int id)
+bool runCopySingleChunk(int id)
 {
-    // randomly generate a chunk of data
-    for (unsigned long long i = 0; i < MEM_BUFFER_SIZE; i++)
+    // Copy
+    unsigned long long startTSC = __rdtsc();
+
+    for (unsigned long long i = 0; i < ITERATIONS; i++)
     {
-        saveFileTestData[id]->memBuffer[i] = random(4096) * (id + 1);
+        copyMem(gMemoryDest[0], gMemorySrc[0], CHUNK_SIZE);
     }
 
-    // Randomly pick some part of data for writing out
-    unsigned long long remainedData = MEM_BUFFER_SIZE;
-    for (int i = 0; i < sizeof(saveFileTestData[id]->dataPos) / sizeof(saveFileTestData[id]->dataPos[0]); i++)
-    {
-        // Start of the data
-        saveFileTestData[id]->dataPos[i][0] = random64(MEM_BUFFER_SIZE - 1);
+    unsigned long long endTSC = __rdtsc();
 
-        // Size of the data. Make sure we limit all small files in size of total MEM_BUFFER_SIZE
-        unsigned long long dataSize = random64(MEM_BUFFER_SIZE - saveFileTestData[id]->dataPos[i][0]);
-        dataSize = dataSize > remainedData ? remainedData : dataSize;
-        remainedData = remainedData - dataSize;
+    unsigned long long total_cycles = endTSC - startTSC;
 
-        if (dataSize == 0)
-        {
-            dataSize = 1;
-        }
-
-        saveFileTestData[id]->dataPos[i][1] = dataSize;
-    }
-}
-
-bool runSaveLargeFile(int processId, bool paralellFlag = true, bool blocking = true)
-{
-    int id = processId;
-
-    // Save file
-    CHAR16 fileName[32];
-    setText(fileName, L"file_");
-    appendNumber(fileName, id, false);
-
-    // Generate random data
-    for (unsigned long long i = 0; i < MEM_BUFFER_SIZE; i++)
-    {
-        saveFileTestData[id]->memBuffer[i] = random(4096) * (id + 1);
-    }
-
-    // Try to save the files
-    long long sts = -1;
-    if (paralellFlag)
-    {
-        sts = asyncSaveLargeFile(fileName, MEM_BUFFER_SIZE * sizeof(unsigned int), (unsigned char*)(saveFileTestData[id]->memBuffer), NULL, false, blocking);
-    }
-    else
-    {
-        sts = saveLargeFile(fileName, MEM_BUFFER_SIZE * sizeof(unsigned int), (unsigned char*)(saveFileTestData[id]->memBuffer), NULL, false);
-    }
-    if (sts <= 0 || sts != MEM_BUFFER_SIZE * sizeof(unsigned int))
-    {
-        CHAR16 loginfo[256];
-        setText(loginfo, L"saveFile failed at ");
-        appendText(loginfo, fileName);
-        appendText(loginfo, L" with size ");
-        appendNumber(loginfo, MEM_BUFFER_SIZE * sizeof(unsigned int) / 1024, true);
-        appendText(loginfo, L"KB . Error: -");
-        appendNumber(loginfo, -sts, true);
-
-        ACQUIRE(logMessageLock);
-        logToConsole(loginfo);
-        RELEASE(logMessageLock);
-
-        return false;
-    }
+    gProfiles[id].count = ITERATIONS;
+    gProfiles[id].totalProcessingTime = total_cycles;
+    gProfiles[id].totalSizeInMB = ((ITERATIONS * CHUNK_SIZE) >> 20);
 
     return true;
 }
 
-bool runSaveFile(int processId, bool parallelFlag = true, bool blocking = true)
+bool runCopyFull(int id)
 {
-    int id = processId;
+    unsigned long long startTSC = __rdtsc();
 
-    // Save file
-    CHAR16 fileName[32];
-    setText(fileName, L"file_");
-    appendNumber(fileName, id, false);
-
-    // Generate random data
-    generateDataPerId(id);
-
-    // Try to save the files
-    for (int i = 0; i < sizeof(saveFileTestData[id]->dataPos) / sizeof(saveFileTestData[id]->dataPos[0]); i++)
+    //for (unsigned long long i = 0; i < ITERATIONS; i++)
     {
-        unsigned long long dataStart = saveFileTestData[id]->dataPos[i][0];
-        unsigned long long dataCount = saveFileTestData[id]->dataPos[i][1];
+        copyMem(gContinuousMemoryDst, gContinuousMemorySrc, CHUNK_SIZE * MEMORY_REGIONS_COUNT);
+    }
 
-        CHAR16 partionFileName[256];
-        setText(partionFileName, fileName);
-        appendText(partionFileName, L".");
-        appendNumber(partionFileName, i, false);
+    unsigned long long endTSC = __rdtsc();
 
-        long long sts = -1;
-        if (parallelFlag)
+    unsigned long long total_cycles = endTSC - startTSC;
+
+    gProfiles[id].count = ITERATIONS;
+    gProfiles[id].totalProcessingTime = total_cycles;
+    gProfiles[id].totalSizeInMB = ((CHUNK_SIZE * MEMORY_REGIONS_COUNT) >> 20);
+    return true;
+}
+
+bool verifyCopySingleChunk()
+{
+    // Copy
+    for (unsigned long long j = 0; j < CHUNK_SIZE; j++)
+    {
+        if (gMemoryDest[0][j] != gMemorySrc[0][j])
         {
-            sts = asyncSave(partionFileName, dataCount * sizeof(unsigned int), (unsigned char*)&(saveFileTestData[id]->memBuffer[dataStart]), NULL, blocking);
-        }
-        else
-        {
-            sts = save(partionFileName, dataCount * sizeof(unsigned int), (unsigned char*)&(saveFileTestData[id]->memBuffer[dataStart]), NULL);
-        }
-
-        if (sts <= 0)
-        {
-            CHAR16 loginfo[256];
-            setText(loginfo, L"saveFile failed at ");
-            appendText(loginfo, partionFileName);
-            appendText(loginfo, L" with size ");
-            appendNumber(loginfo, dataCount * sizeof(unsigned int) / 1024, true);
-            appendText(loginfo, L"KB . Error: -");
-            appendNumber(loginfo, -sts, true);
-
-            ACQUIRE(logMessageLock);
-            logToConsole(loginfo);
-            RELEASE(logMessageLock);
-
             return false;
         }
     }
+    return true;
+}
+
+bool runCopyMultipleChunks(int id)
+{
+    // Copy
+    unsigned long long startTSC = __rdtsc();
+
+    //for (int i = 0; i < ITERATIONS; i++)
+    {
+        for (int j = 0; j < MEMORY_REGIONS_COUNT; j++)
+        {
+            copyMem(gMemoryDest[j], gMemorySrc[j], CHUNK_SIZE);
+        }
+    }
+
+    unsigned long long endTSC = __rdtsc();
+
+    unsigned long long total_cycles = endTSC - startTSC;
+
+    gProfiles[id].count = ITERATIONS;
+    gProfiles[id].totalProcessingTime = total_cycles;
+    gProfiles[id].totalSizeInMB = ((CHUNK_SIZE * MEMORY_REGIONS_COUNT) >> 20);
 
     return true;
 }
 
-bool runReadFile(int processId, bool parallelFlag = true)
+bool runCopyMultipleChunksMultiThread(int id)
 {
-    int id = processId;
-
-    // Save file
-    CHAR16 fileName[32];
-    setText(fileName, L"file_");
-    appendNumber(fileName, id, false);
-
-    // Try to read the files
-    for (int i = 0; i < sizeof(saveFileTestData[id]->dataPos) / sizeof(saveFileTestData[id]->dataPos[0]); i++)
+    // Copy
+    for (int j = id; j < MEMORY_REGIONS_COUNT; j += gNumberOfAllProcessors)
     {
-        unsigned long long dataStart = saveFileTestData[id]->dataPos[i][0];
-        unsigned long long dataCount = saveFileTestData[id]->dataPos[i][1];
-
-        CHAR16 partionFileName[256];
-        setText(partionFileName, fileName);
-        appendText(partionFileName, L".");
-        appendNumber(partionFileName, i, false);
-
-        long long sts = -1;
-        if (parallelFlag)
-        {
-            sts = asyncLoad(partionFileName, dataCount * sizeof(unsigned int), (unsigned char*)&(saveFileTestData[id]->memBuffer[dataStart]), NULL);
-        }
-        else
-        {
-            sts = load(partionFileName, dataCount * sizeof(unsigned int), (unsigned char*)&(saveFileTestData[id]->memBuffer[dataStart]), NULL);
-        }
-
-        if (sts <= 0)
-        {
-            CHAR16 loginfo[256];
-            setText(loginfo, L"read failed at ");
-            appendText(loginfo, partionFileName);
-            appendText(loginfo, L" with size ");
-            appendNumber(loginfo, dataCount * sizeof(unsigned int) / 1024, true);
-            appendText(loginfo, L"KB . Error: -");
-            appendNumber(loginfo, -sts, true);
-
-            ACQUIRE(logMessageLock);
-            logToConsole(loginfo);
-            RELEASE(logMessageLock);
-
-            return false;
-        }
+        copyMem(gMemoryDest[j], gMemorySrc[j], CHUNK_SIZE);
     }
 
     return true;
 }
 
-bool runReadLargeFile(int processId, bool parallelFlag = true)
+bool runCopySingleChunksMultiThread(int id)
 {
-    int id = processId;
-
-    // Save file
-    CHAR16 fileName[32];
-    setText(fileName, L"file_");
-    appendNumber(fileName, id, false);
-
-    // Try to load the large file
-    long long sts = -1;
-    if (parallelFlag)
+    // Copy
+    for (int i = 0; i < (MEMORY_REGIONS_COUNT / gNumberOfAllProcessors); i++)
     {
-        sts = asyncLoadLargeFile(fileName, MEM_BUFFER_SIZE * sizeof(unsigned int), (unsigned char*)(saveFileTestData[id]->memBuffer), NULL);
-    }
-    else
-    {
-        sts = loadLargeFile(fileName, MEM_BUFFER_SIZE * sizeof(unsigned int), (unsigned char*)(saveFileTestData[id]->memBuffer), NULL);
-    }
-    if (sts <= 0 || sts != MEM_BUFFER_SIZE * sizeof(unsigned int))
-    {
-        CHAR16 loginfo[256];
-        setText(loginfo, L"loadLargeFile failed at ");
-        appendText(loginfo, fileName);
-        appendText(loginfo, L" with size ");
-        appendNumber(loginfo, MEM_BUFFER_SIZE * sizeof(unsigned int) / 1024, true);
-        appendText(loginfo, L"KB . Error: -");
-        appendNumber(loginfo, -sts, true);
-
-        ACQUIRE(logMessageLock);
-        logToConsole(loginfo);
-        RELEASE(logMessageLock);
-
-        return false;
+        copyMem(gMemoryDest[id], gMemorySrc[id], CHUNK_SIZE);
     }
 
     return true;
 }
 
-bool verifyWriteFile(int id)
+bool verifyCopyMultipleChunks()
 {
-    CHAR16 logInfo[256];
-    CHAR16 fileName[32];
-    setText(fileName, L"file_");
-    appendNumber(fileName, id, false);
-
-    for (int i = 0; i < sizeof(saveFileTestData[id]->dataPos) / sizeof(saveFileTestData[id]->dataPos[0]); i++)
+    // Copy
+    for (int i = 0; i < MEMORY_REGIONS_COUNT; i++)
     {
-        unsigned long long dataStart = saveFileTestData[id]->dataPos[i][0];
-        unsigned long long dataCount = saveFileTestData[id]->dataPos[i][1];
-
-        CHAR16 partionFileName[256];
-        setText(partionFileName, fileName);
-        appendText(partionFileName, L".");
-        appendNumber(partionFileName, i, false);
-
-        long long sts = load(partionFileName, dataCount * sizeof(unsigned int), (unsigned char*)&(saveFileTestDataBuffer->memBuffer[0]), NULL);
-
-        if (sts <= 0)
+        for (unsigned long long j = 0; j < CHUNK_SIZE; j++)
         {
-            setText(logInfo, partionFileName);
-            appendText(logInfo, L" is FAILED to load.");
-            logToConsole(logInfo);
-
-            return false;
-        }
-
-        unsigned int* originalData = &(saveFileTestData[id]->memBuffer[dataStart]);
-        unsigned int* loadedData = &(saveFileTestDataBuffer->memBuffer[0]);
-
-        for (unsigned long long k = 0; k < dataCount; k++)
-        {
-            if (originalData[k] != loadedData[k])
+            if (gMemoryDest[i][j] != gMemorySrc[i][j])
             {
-                setText(logInfo, partionFileName);
-                appendText(logInfo, L" Data mismatched. [");
-                appendNumber(logInfo, k, false);
-                appendText(logInfo, L"]: ");
-                appendNumber(logInfo, originalData[k], false );
-                appendText(logInfo, L" vs  ");
-                appendNumber(logInfo, loadedData[k], false);
-                logToConsole(logInfo);
-
                 return false;
             }
         }
     }
-
     return true;
 }
 
-bool verifyWriteLargeFile(int id)
+bool verifyCopyMultipleThreadSingleChunk()
 {
-    CHAR16 logInfo[256];
-    CHAR16 fileName[32];
-    setText(fileName, L"file_");
-    appendNumber(fileName, id, false);
-
-    setMem((unsigned char*)&(saveFileTestDataBuffer->memBuffer[0]), MEM_BUFFER_SIZE * sizeof(unsigned int), 0);
-    long long sts = loadLargeFile(fileName, MEM_BUFFER_SIZE * sizeof(unsigned int), (unsigned char*)&(saveFileTestDataBuffer->memBuffer[0]), NULL);
-
-    if (sts <= 0 || sts != MEM_BUFFER_SIZE * sizeof(unsigned int))
+    for (int i = 0; i < gNumberOfAllProcessors; i++)
     {
-        setText(logInfo, fileName);
-        appendText(logInfo, L" is FAILED to load.");
-        logToConsole(logInfo);
-
-        return false;
-    }
-
-    unsigned int* originalData = saveFileTestData[id]->memBuffer;
-    unsigned int* loadedData = saveFileTestDataBuffer->memBuffer;
-
-    for (unsigned long long k = 0; k < MEM_BUFFER_SIZE; k++)
-    {
-        if (originalData[k] != loadedData[k])
+        for (unsigned long long j = 0; j < CHUNK_SIZE; j++)
         {
-            setText(logInfo, fileName);
-            appendText(logInfo, L" Data mismatched. [");
-            appendNumber(logInfo, k, false);
-            appendText(logInfo, L"]: ");
-            appendNumber(logInfo, originalData[k], false);
-            appendText(logInfo, L" vs  ");
-            appendNumber(logInfo, loadedData[k], false);
-            logToConsole(logInfo);
+            if (gMemoryDest[i][j] != gMemorySrc[i][j])
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
 
+bool verifyCopyMultipleContinuousChunks()
+{
+    for (unsigned long long i = 0; i < MEMORY_REGIONS_COUNT * CHUNK_SIZE; i++)
+    {
+        if (gContinuousMemoryDst[i] != gContinuousMemorySrc[i])
+        {
             return false;
         }
     }
-
     return true;
 }
 
-bool verifyWriteResult(bool parallelFlag)
+bool runCopyContinuousMultipleChunksMultiThread(int id)
 {
-    // Scheduler write will happen here. Flush all data to disk.
-    flushAsyncFileIOBuffer();
+    // Compute total memory size in bytes
+    unsigned long long totalSize = MEMORY_REGIONS_COUNT * CHUNK_SIZE;
 
-    CHAR16 logInfo[256];
-    // Check the result by loading the file and compare
-    int matchFileCount = 0;
-    int expectedMatchFileCount = parallelFlag ? gNumberOfAllProcessors : 1;
-    for (int id = 0; id < gNumberOfAllProcessors; id++)
+    // Divide total size among threads
+    unsigned long long baseSize = totalSize / gNumberOfAllProcessors;
+    unsigned long long remainder = totalSize % gNumberOfAllProcessors;
+
+    // Each thread gets 'baseSize' bytes
+    // The last thread gets the remainder too
+    unsigned long long startOffset = id * baseSize;
+    unsigned long long endOffset = startOffset + baseSize;
+
+    // Give remainder to the last thread
+    if (id == gNumberOfAllProcessors - 1)
+        endOffset += remainder;
+
+    // Clamp (just in case)
+    if (endOffset > totalSize)
     {
-        if (parallelFlag)
-        {
-            if (verifyWriteFile(id))
-            {
-                matchFileCount++;
-            }
-        }
-        else
-        {
-            if (id == gBSProc)
-            {
-                if (verifyWriteFile(id))
-                {
-                    matchFileCount++;
-                }
-                break;
-            }
-        }
-
+        endOffset = totalSize;
     }
 
-    setText(logInfo, L"  - Matched data: ");
-    appendNumber(logInfo, matchFileCount, false);
-    appendText(logInfo, L" / ");
-    appendNumber(logInfo, expectedMatchFileCount, false);
-    logToConsole(logInfo);
-
-    return (matchFileCount == expectedMatchFileCount);
-}
-
-bool verifyLargeFileWriteResult(bool parallelFlag)
-{
-    // Scheduler write will happen here. Flush all data to disk.
-    flushAsyncFileIOBuffer();
-
-    CHAR16 logInfo[256];
-    // Check the result by loading the file and compare
-    int matchFileCount = 0;
-    int expectedMatchFileCount = parallelFlag ? gNumberOfAllProcessors : 1;
-    for (int id = 0; id < gNumberOfAllProcessors; id++)
+    // Copy continuous region
+    for (unsigned long long offset = startOffset; offset < endOffset; offset += CHUNK_SIZE)
     {
-        if (parallelFlag)
-        {
-            if (verifyWriteLargeFile(id))
-            {
-                matchFileCount++;
-            }
-        }
-        else
-        {
-            if (id == gBSProc)
-            {
-                if (verifyWriteLargeFile(id))
-                {
-                    matchFileCount++;
-                }
-                break;
-            }
-        }
+        unsigned long long remaining = endOffset - offset;
+        unsigned long long sizeToCopy = remaining < CHUNK_SIZE ? remaining : CHUNK_SIZE;
 
+        copyMem(gContinuousMemoryDst + offset, gContinuousMemorySrc + offset, sizeToCopy);
     }
-
-    setText(logInfo, L"  - Matched data: ");
-    appendNumber(logInfo, matchFileCount, false);
-    appendText(logInfo, L" / ");
-    appendNumber(logInfo, expectedMatchFileCount, false);
-    logToConsole(logInfo);
-
-    return (matchFileCount == expectedMatchFileCount);
-
     return true;
+
 }
 
 bool prepareTest()
 {
-    // For test loading files. Generate a list of files before reading
-    for (int id = 0; id < gNumberOfAllProcessors; id++)
-    {
-        bool sts = true;
-        switch (gCurrentTestCase)
-        {
-            case READ_FILE:
-                sts = runSaveFile(id, false);
-                break;
-            case READ_LARGE_FILE:
-                sts = runSaveLargeFile(id, false);
-                break;
-            case ASYNC_READ_FILE:
-                sts = runSaveFile(id, false);
-                break;
-            case ASYNC_READ_LARGE_FILE:
-                sts = runSaveLargeFile(id, false);
-                break;
-            default:
-                break;
-        }
+    // Randomly fill the MEMORY_TEST_SIZE
+    bool initContinuousMem = false;
 
-        if (!sts)
+    switch (gCurrentTestCase)
+    {
+    case MEMCPY_SINGLE_THREAD_ONE_CHUNK:
+        gTestSizeInMB = ((MEMORY_REGIONS_COUNT * CHUNK_SIZE * ITERATIONS) >> 20);
+        break;
+    case MEMCPY_SINGLE_THREAD_MANY_CHUNKS:
+        gTestSizeInMB = ((MEMORY_REGIONS_COUNT * CHUNK_SIZE) >> 20);
+        break;
+    case MEMCPY_MULTITHREADS_MANY_CHUNKS:
+        gTestSizeInMB = ((MEMORY_REGIONS_COUNT * CHUNK_SIZE) >> 20);
+        break;
+    case MEMCPY_MULTITHREADS_ONE_CHUNK:
+        gTestSizeInMB = ((CHUNK_SIZE * gNumberOfAllProcessors * (MEMORY_REGIONS_COUNT / gNumberOfAllProcessors)) >> 20);
+        break;
+    case MEMCPY_MULTITHREADS_MANY_CHUNKS_CONTINUOUS:
+        gTestSizeInMB = ((CHUNK_SIZE * MEMORY_REGIONS_COUNT) >> 20);
+        initContinuousMem = true;
+        break;
+    case MEMCPY_SINGLE_THREAD_FULL_COPY:
+        gTestSizeInMB = ((CHUNK_SIZE * MEMORY_REGIONS_COUNT) >> 20);
+        initContinuousMem = true;
+        break;
+    default:
+        break;
+    }
+
+    if (initContinuousMem)
+    {
+        // Continuous mem
+        allocatePool(MEMORY_REGIONS_COUNT * CHUNK_SIZE, (void**)&gContinuousMemorySrc);
+        allocatePool(MEMORY_REGIONS_COUNT * CHUNK_SIZE, (void**)&gContinuousMemoryDst);
+        setMem(gContinuousMemorySrc, MEMORY_REGIONS_COUNT * CHUNK_SIZE, 0);
+        setMem(gContinuousMemoryDst, MEMORY_REGIONS_COUNT * CHUNK_SIZE, 0);
+
+        for (unsigned long long i = 0; i < MEMORY_REGIONS_COUNT * CHUNK_SIZE; i += 8)
         {
-            logToConsole(L"Prepare test for READ file is failed");
-            return false;
+            _rdrand64_step((unsigned long long*)(gContinuousMemoryDst + i));
+            _rdrand64_step((unsigned long long*)(gContinuousMemorySrc + i));
         }
     }
+    else
+    {
+        for (int i = 0; i < MEMORY_REGIONS_COUNT; i++)
+        {
+            // Allocate bigger so that assure memory not continuous
+            allocatePool(3 * CHUNK_SIZE / 2, (void**)&gMemorySrc[i]);
+            allocatePool(3 * CHUNK_SIZE / 2, (void**)&gMemoryDest[i]);
+
+            setMem(gMemorySrc[i], 3 * CHUNK_SIZE / 2, 0);
+            setMem(gMemoryDest[i], 3 * CHUNK_SIZE / 2, 0);
+        }
+
+        for (unsigned long long i = 0; i < MEMORY_REGIONS_COUNT; i++)
+        {
+            for (unsigned long long j = 0; j < CHUNK_SIZE; j += 8)
+            {
+                _rdrand64_step((unsigned long long*)(gMemorySrc[i] + j));
+                _rdrand64_step((unsigned long long*)(gMemoryDest[i] + j));
+            }
+        }
+    }
+
+    return true;
+}
+
+bool finalizeTest()
+{
+    logToConsole(L"Finalizing test...");
+    if (gCurrentTestCase == MEMCPY_MULTITHREADS_MANY_CHUNKS_CONTINUOUS
+        || gCurrentTestCase == MEMCPY_SINGLE_THREAD_FULL_COPY)
+    {
+        if (gContinuousMemorySrc != NULL)
+        {
+            freePool(gContinuousMemorySrc);
+            gContinuousMemorySrc = NULL;
+        }
+        if (gContinuousMemoryDst != NULL)
+        {
+            freePool(gContinuousMemoryDst);
+            gContinuousMemoryDst = NULL;
+        }
+    }
+    else
+    {
+        for (int i = 0; i < MEMORY_REGIONS_COUNT; i++)
+        {
+            if (gMemorySrc[i] != NULL)
+            {
+                freePool(gMemorySrc[i]);
+                gMemorySrc[i] = NULL;
+            }
+            if (gMemoryDest[i] != NULL)
+            {
+                freePool(gMemoryDest[i]);
+                gMemoryDest[i] = NULL;
+            }
+        }
+    }
+    
+
     return true;
 }
 
 bool verifyResult()
 {
-    bool allTestPass = true;
+    bool testResult = true;
 
-    // Check test result
-    CHAR16 logInfo[256];
-    for (int id = 0; id < gNumberOfAllProcessors; id++)
+    // Test the save file
+    switch (gCurrentTestCase)
     {
-        if (gProcessorResult[id] == 0)
-        {
-            allTestPass = false;
-            setText(logInfo, L"Read/Write failed at thread ");
-            appendNumber(logInfo, id, false);
-            logToConsole(logInfo);
-        }
+    case MEMCPY_SINGLE_THREAD_ONE_CHUNK:
+        testResult = verifyCopySingleChunk();
+        break;
+    case MEMCPY_SINGLE_THREAD_MANY_CHUNKS:
+        testResult = verifyCopyMultipleChunks();
+        break;
+    case MEMCPY_MULTITHREADS_MANY_CHUNKS:
+        testResult = verifyCopyMultipleChunks();
+        break;
+    case MEMCPY_MULTITHREADS_ONE_CHUNK:
+        testResult = verifyCopyMultipleThreadSingleChunk();
+        break;
+    case MEMCPY_MULTITHREADS_MANY_CHUNKS_CONTINUOUS:
+        testResult = verifyCopyMultipleContinuousChunks();
+        break;
+    case MEMCPY_SINGLE_THREAD_FULL_COPY:
+        testResult = verifyCopyMultipleContinuousChunks();
+        break;
+    default:
+        break;
     }
 
-    // Test matching data.
-    if (allTestPass)
-    {
-        switch (gCurrentTestCase)
-        {
-        case WRITE_FILE:
-            allTestPass = verifyWriteResult(false);
-            break;
-        case ASYNC_WRITE_FILE:
-        case ASYNC_BLOCKING_WRITE_FILE:
-            allTestPass = verifyWriteResult(true);
-            break;
-        case WRITE_LARGE_FILE:
-            allTestPass = verifyLargeFileWriteResult(false);
-            break;
-        case ASYNC_WRITE_LARGE_FILE:
-        case ASYNC_BLOCKING_WRITE_LARGE_FILE:
-            allTestPass = verifyLargeFileWriteResult(true);
-            break;
-        case READ_FILE:
-            allTestPass = verifyWriteResult(true);
-            break;
-        case READ_LARGE_FILE:
-            allTestPass = verifyLargeFileWriteResult(true);
-            break;
-        case ASYNC_READ_FILE:
-            allTestPass = verifyWriteResult(true);
-            break;
-        case ASYNC_READ_LARGE_FILE:
-            allTestPass = verifyLargeFileWriteResult(true);
-            break;
-        default:
-            break;
-        }
-    }
-
-    return allTestPass;
+    return testResult;
 }
 
-#pragma optimize("", off)
 // Main test function for each processor
 void threadRun(void* processId)
 {
@@ -708,54 +551,30 @@ void threadRun(void* processId)
     gProcessorReady[id] = 0;
     RELEASE(gProcessorLock[id]);
 
-    //CHAR16 logInfo[256];
-    //setText(logInfo, L"Thread id");
-    //appendNumber(logInfo, id, false);
-
-    ////if (id == 0)
-    //{
-    //    ACQUIRE(logMessageLock);
-    //    logToConsole(logInfo);
-    //    RELEASE(logMessageLock);
-    //}
-
     // Test the save file
     switch (gCurrentTestCase)
     {
-        case WRITE_FILE:
-            testResult = runSaveFile(id, false);
+        case MEMCPY_SINGLE_THREAD_FULL_COPY:
+            testResult = runCopyFull(id);
             break;
-        case WRITE_LARGE_FILE:
-            testResult = runSaveLargeFile(id, false);
+        case MEMCPY_SINGLE_THREAD_ONE_CHUNK:
+            testResult = runCopySingleChunk(id);
             break;
-        case ASYNC_WRITE_FILE:
-            testResult = runSaveFile(id, true, false);
+        case MEMCPY_SINGLE_THREAD_MANY_CHUNKS:
+            testResult = runCopyMultipleChunks(id);
             break;
-        case ASYNC_WRITE_LARGE_FILE:
-            testResult = runSaveLargeFile(id, true, false);
+        case MEMCPY_MULTITHREADS_MANY_CHUNKS:
+            testResult = runCopyMultipleChunksMultiThread(id);
             break;
-        case ASYNC_BLOCKING_WRITE_FILE:
-            testResult = runSaveFile(id, true, true);
+        case MEMCPY_MULTITHREADS_ONE_CHUNK:
+            testResult = runCopySingleChunksMultiThread(id);
             break;
-        case ASYNC_BLOCKING_WRITE_LARGE_FILE:
-            testResult = runSaveLargeFile(id, true, true);
-            break;
-        case READ_FILE:
-            testResult = runReadFile(id, false);
-            break;
-        case READ_LARGE_FILE:
-            testResult = runReadLargeFile(id, false);
-            break;
-        case ASYNC_READ_FILE:
-            testResult = runReadFile(id, true);
-            break;
-        case ASYNC_READ_LARGE_FILE:
-            testResult = runReadLargeFile(id, true);
+        case MEMCPY_MULTITHREADS_MANY_CHUNKS_CONTINUOUS:
+            testResult = runCopyContinuousMultipleChunksMultiThread(id);
             break;
         default:
             break;
     }
-
 
     gProcessorResult[id] = testResult ? 1 : 0;
 
@@ -910,13 +729,6 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
         }
 
 
-        if (!initFilesystem(gpServicesProtocol))
-        {
-            logToConsole(L"Init filesystem failed!");
-            return EFI_ABORTED;
-        }
-
-
         // Init test
         initTest();
 
@@ -924,10 +736,6 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
         int testCount = sizeof(gTestCases) / sizeof(gTestCases[0]);
 
         // Run the tests
-        setText(loginfo, L"BufferSize for each thread: ");
-        appendNumber(loginfo, MEM_BUFFER_SIZE * sizeof(int) / 1024, false);
-        appendText(loginfo, L" KB");
-        logToConsole(loginfo);
         for (int test = 0; test < testCount; test++)
         {
             gCurrentTestCase = gTestCases[test];
@@ -948,12 +756,13 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
             // Run the test
             setMem(gProcessorReady, gNumberOfAllProcessors * sizeof(gProcessorReady[0]), 1);
             setMem(gProcessorResult, gNumberOfAllProcessors * sizeof(gProcessorResult[0]), 0);
-            if (gCurrentTestCase != WRITE_FILE 
-                && gCurrentTestCase != WRITE_LARGE_FILE
-                && gCurrentTestCase != READ_FILE
-                && gCurrentTestCase != READ_LARGE_FILE)
+            if (gCurrentTestCase != MEMCPY_SINGLE_THREAD_ONE_CHUNK 
+                && gCurrentTestCase != MEMCPY_SINGLE_THREAD_MANY_CHUNKS
+                && gCurrentTestCase != MEMCPY_SINGLE_THREAD_FULL_COPY)
             {
                 logToConsole(L"  - Running multithread test...");
+
+                unsigned long long startTick = __rdtsc();
                 unsigned long long eventsCount = 0;
                 // Start the task for all application Proccessor
                 for (int i = 0; i < gNumberOfAllProcessors; i++)
@@ -983,22 +792,10 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
 
                 // Start the test with main processor
                 threadRun(&bsProcID);
-
                 // Wait for all task is done
-                logToConsole(L"  - Waiting for all tasks done...");
-                unsigned long long startTick = __rdtsc();
                 int readyCount = 0;
                 while (readyCount < gNumberOfAllProcessors)
                 {
-                    // Don't flush right away. Wait sometimes for simulate
-                    unsigned long long waitingTimeInMs = (__rdtsc() - startTick) * 1000 / frequency;
-                    if (waitingTimeInMs > 30000)
-                    {
-                        logToConsole(L"  - Flusing the buffer ...");
-                        startTick = __rdtsc();
-                        flushAsyncFileIOBuffer();
-                    }
-
                     readyCount = 0;
                     for (int i = 0; i < gNumberOfAllProcessors; i++)
                     {
@@ -1012,6 +809,36 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
                         }
                     }
                 }
+                unsigned long long endTick = __rdtsc();
+                unsigned long long total_cycles = endTick - startTick;
+
+                logToConsole(L"  - All tasks done...");
+
+
+                unsigned long long totalProcessingTime = total_cycles;
+                setText(loginfo, L"  - Profile.");
+
+                appendText(loginfo, L" TotalSize: ");
+                appendNumber(loginfo, gTestSizeInMB, true);
+                appendText(loginfo, L" MB.");
+
+                long long copyTimeMs = totalProcessingTime * 1000 / frequency;
+                appendText(loginfo, L" CopyTime: ");
+                appendNumber(loginfo, copyTimeMs, false);
+                appendText(loginfo, L" ms.");
+                if (copyTimeMs > 0)
+                {
+                    long long copyRate = gTestSizeInMB * 1000 / copyTimeMs ;
+                    appendText(loginfo, L" CopyRate: ");
+                    appendNumber(loginfo, copyRate, true);
+                    appendText(loginfo, L" MB/s.");
+                }
+                else
+                {
+                    appendText(loginfo, L" NA");
+                }
+
+                logToConsole(loginfo);
 
                 // Close all events
                 for (int k = 0; k < eventsCount; k++)
@@ -1025,8 +852,34 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
                 logToConsole(L"  - Running test...");
 
                 // Start the test with main processor
+                gProfiles[bsProcID].reset();
                 setMem(gProcessorResult, gNumberOfAllProcessors * sizeof(gProcessorResult[0]), 1);
                 threadRun(&bsProcID);
+
+                setText(loginfo, L"  - Profile.");
+
+                appendText(loginfo, L" TotalSize: ");
+                appendNumber(loginfo, gProfiles[bsProcID].totalSizeInMB, true);
+                appendText(loginfo, L" MB.");
+                
+                long long copyTimeMs = gProfiles[bsProcID].totalProcessingTime * 1000 / frequency;
+                appendText(loginfo, L" CopyTime: ");
+                appendNumber(loginfo, copyTimeMs, false);
+                appendText(loginfo, L" ms.");
+
+                appendText(loginfo, L" CopyRate: ");
+                if (copyTimeMs > 0)
+                {
+                    long long copyRate = gProfiles[bsProcID].totalSizeInMB * 1000 / copyTimeMs ;
+                    appendNumber(loginfo, copyRate , true);
+                    appendText(loginfo, L" MB/s.");
+                }
+                else
+                {
+                    appendText(loginfo, L" NA");
+                }
+
+                logToConsole(loginfo);
             }
 
             logToConsole(L"  - Verifying result...");
@@ -1037,6 +890,9 @@ EFI_STATUS efi_main(EFI_HANDLE imageHandle, EFI_SYSTEM_TABLE* systemTable)
             {
                 testSuccessCount++;
             }
+
+            // Finalize the test
+            finalizeTest();
 
         }
         // Show test result
