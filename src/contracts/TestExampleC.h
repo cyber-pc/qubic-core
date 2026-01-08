@@ -271,10 +271,69 @@ public:
 		}
 	}
 
+	// MOCK ORACLE TESTING
+	// TODO: move this log into oracle engine
+	struct MockOracleLogger
+	{
+		uint64 successReplies;		// success replies
+		uint64 totalReplies;		// total of replies
+		uint64 totalQuerries;		// total of querries
+		uint64 lastQueryValue;      // the last value sent in query
+		uint64 lastEchoedValue;     // returned last echoed value
+		uint64 lastDoubledValue;    // returned last doubled value
+		uint8 lastErrorFlag;        // 0 = valid, >0 = error
+		sint8 _terminator;      // Only data before this is logged
+	} mockOracleLog;
+
+	typedef OracleNotificationInput<OI::Mock> NotifyMockOracleReply_input;
+	typedef NoData NotifyMockOracleReply_output;
+	struct NotifyMockOracleReply_locals
+	{
+		OI::Mock::OracleQuery query;
+		uint32 queryExtraData;
+	};
+
+	PRIVATE_PROCEDURE_WITH_LOCALS(NotifyMockOracleReply)
+	{
+		state.mockOracleLog.totalReplies = state.mockOracleLog.totalReplies + 1;
+		state.mockOracleLog.lastErrorFlag = 0;
+		if (input.status == ORACLE_QUERY_STATUS_SUCCESS)
+		{
+			// get and use query info
+			if (!qpi.getOracleQuery<OI::Mock>(input.queryId, locals.query))
+			{
+				state.mockOracleLog.lastErrorFlag = 1;
+			}
+			else
+			{
+				// test the reply
+				state.mockOracleLog.lastQueryValue = locals.query.value;
+				state.mockOracleLog.lastEchoedValue = input.reply.echoedValue;
+				state.mockOracleLog.lastDoubledValue = input.reply.doubledValue;
+				if (!OI::Mock::replyIsValid(locals.query, input.reply))
+				{
+					state.mockOracleLog.lastErrorFlag = 2;
+				}
+				else
+				{
+					state.mockOracleLog.successReplies = state.mockOracleLog.successReplies + 1;
+				}
+			}
+		}
+		else
+		{
+			// handle failure ...
+			state.mockOracleLog.lastErrorFlag = 255;
+		}
+	}
+
 	struct END_TICK_locals
 	{
 		OI::Price::OracleQuery priceOracleQuery;
 		sint64 oracleQueryId;
+
+		OI::Mock::OracleQuery mockOracleQuery;
+		sint64 mockOracleQueryId;
 	};
 
 	END_TICK_WITH_LOCALS()
@@ -284,6 +343,17 @@ public:
 		{
 			locals.oracleQueryId = QUERY_ORACLE(OI::Price, locals.priceOracleQuery, NotifyPriceOracleReply, 20000);
 		}
+
+		// Mock oracle
+		if (qpi.tick() % 2)
+		{
+			locals.mockOracleQuery.value = qpi.tick();
+			locals.oracleQueryId = QUERY_ORACLE(OI::Mock, locals.mockOracleQuery, NotifyMockOracleReply, 20000);
+			state.mockOracleLog.totalQuerries = state.mockOracleLog.totalQuerries + 1;
+		}
+
+
+		LOG_INFO(state.mockOracleLog);
 	}
 
 	//---------------------------------------------------------------
@@ -302,5 +372,6 @@ public:
 		REGISTER_USER_PROCEDURE(QueryPriceOracle, 100);
 
 		REGISTER_USER_PROCEDURE_NOTIFICATION(NotifyPriceOracleReply);
+		REGISTER_USER_PROCEDURE_NOTIFICATION(NotifyMockOracleReply);
 	}
 };
