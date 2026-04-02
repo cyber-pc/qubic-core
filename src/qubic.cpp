@@ -229,6 +229,11 @@ static constexpr unsigned int gScoreMultiplier[score_engine::AlgoType::MaxAlgoCo
 static unsigned int gCustomMiningSharesCount[NUMBER_OF_COMPUTORS] = { 0 };
 static CustomMiningSharesCounter gCustomMiningSharesCounter;
 
+// DOGE merged-mining shares (separate pipeline from XMR custom mining)
+static volatile char gDogeMiningSharesCountLock = 0;
+static unsigned int gDogeMiningSharesCount[NUMBER_OF_COMPUTORS] = { 0 };
+static CustomMiningSharesCounter gDogeMiningSharesCounter;
+
 static CustomQubicMiningStorage customQubicMiningStorage;
 
 // variables and declare for persisting state
@@ -256,6 +261,7 @@ struct
     unsigned int numberOfMiners;
     unsigned int numberOfTransactions;
     unsigned char customMiningSharesCounterData[CustomMiningSharesCounter::_customMiningSolutionCounterDataSize];
+    unsigned char dogeMiningSharesCounterData[CustomMiningSharesCounter::_customMiningSolutionCounterDataSize];
 } nodeStateBuffer;
 #endif
 static bool saveContractStateFiles(CHAR16* directory = NULL);
@@ -1581,6 +1587,9 @@ static void processBroadcastCustomMiningSolution(RequestResponseHeader* header)
                     CustomQubicMiningStorage::StoredDogeMiningTask task;
                     if (customQubicMiningStorage.addSolution(sol, messageSize - SIGNATURE_SIZE, reinterpret_cast<unsigned char*>(&task)) < 0)
                         return;
+
+                    // [DOGE REVENUE] TODO: count DOGE share here (increment gDogeMiningSharesCount[compIdx])
+                    // so that the revenue formula can use gDogeMiningSharesCounter.getSharesCount() at epoch end.
 
                     unsigned char buffer[sizeof(OracleUserQueryTransactionPrefix)
                         + sizeof(OI::DogeShareValidation::OracleQuery) + SIGNATURE_SIZE];
@@ -3644,11 +3653,13 @@ static void processTick(unsigned long long processorNumber)
                 {
                     // Share is valid
                     // TODO: implement share counting
+                    // [DOGE REVENUE] TODO: confirm share count (if using optimistic counting, nothing to do here)
                 }
                 else
                 {
                     // Share is invalid
                     // TODO: handle or remove this else block
+                    // [DOGE REVENUE] TODO: deduct share count if it was counted optimistically at submission
                 }
             }
             else
@@ -3816,6 +3827,42 @@ static void processTick(unsigned long long processorNumber)
             ACQUIRE(gCustomMiningSharesCountLock);
             setMem(gCustomMiningSharesCount, sizeof(gCustomMiningSharesCount), 0);
             RELEASE(gCustomMiningSharesCountLock);
+
+            // Accumulate DOGE mining shares for this phase cycle
+            ACQUIRE(gDogeMiningSharesCountLock);
+            gDogeMiningSharesCounter.accumulateFromRawCounts(gDogeMiningSharesCount);
+            setMem(gDogeMiningSharesCount, sizeof(gDogeMiningSharesCount), 0);
+            RELEASE(gDogeMiningSharesCountLock);
+
+            // [DOGE BROADCAST] To switch to broadcast mode (same as XMR, for consensus via packed TX):
+            // Requires: gDogeMiningBroadcastTxBuffer[NUMBER_OF_COMPUTORS], DogeMiningShareTransaction type,
+            // and a processTransactionData() handler on the receiving side.
+            //
+            // for (unsigned int di = 0; di < numberOfOwnComputorIndices; di++)
+            // {
+            //     ACQUIRE(gDogeMiningSharesCountLock);
+            //     for (int k = 0; k < NUMBER_OF_COMPUTORS; k++)
+            //     {
+            //         if (gDogeMiningSharesCount[k] > CUSTOM_MINING_SOLUTION_SHARES_COUNT_MAX_VAL)
+            //             gDogeMiningSharesCount[k] = CUSTOM_MINING_SOLUTION_SHARES_COUNT_MAX_VAL;
+            //     }
+            //     gDogeMiningSharesCounter.registerNewShareCount(gDogeMiningSharesCount);
+            //     RELEASE(gDogeMiningSharesCountLock);
+            //
+            //     auto& dogePayload = gDogeMiningBroadcastTxBuffer[di].payload;
+            //     dogePayload.transaction.sourcePublicKey = computorPublicKeys[ownComputorIndicesMapping[di]];
+            //     dogePayload.transaction.destinationPublicKey = m256i::zero();
+            //     dogePayload.transaction.amount = 0;
+            //     dogePayload.transaction.tick = 0;
+            //     dogePayload.transaction.inputType = DogeMiningShareTransaction::transactionType();
+            //     dogePayload.transaction.inputSize = sizeof(dogePayload.packedScore) + sizeof(dogePayload.dataLock);
+            //     gDogeMiningSharesCounter.compressNewSharesPacket(ownComputorIndices[di], dogePayload.packedScore);
+            //     gDogeMiningBroadcastTxBuffer[di].isBroadcasted = false;
+            // }
+            //
+            // ACQUIRE(gDogeMiningSharesCountLock);
+            // setMem(gDogeMiningSharesCount, sizeof(gDogeMiningSharesCount), 0);
+            // RELEASE(gDogeMiningSharesCountLock);
         }
     }
 
@@ -4127,6 +4174,9 @@ static void resetCustomMining()
     gCustomMiningSharesCounter.init();
     setMem(gCustomMiningSharesCount, sizeof(gCustomMiningSharesCount), 0);
 
+    gDogeMiningSharesCounter.init();
+    setMem(gDogeMiningSharesCount, sizeof(gDogeMiningSharesCount), 0);
+
     gSystemCustomMiningSolutionV2Cache.reset();
     for (int i = 0; i < NUMBER_OF_COMPUTORS; ++i)
     {
@@ -4300,6 +4350,13 @@ static void endEpoch()
                 gRevenueComponents.voteScore,
                 gRevenueComponents.customMiningScore,
                 gRevenueComponents.revenue);
+        }
+
+        // Collect mining scores for V2
+        for (unsigned int i = 0; i < NUMBER_OF_COMPUTORS; i++)
+        {
+            gEpochRevenueData.xmrMiningScore[i] = gRevenueComponents.customMiningScore[i];
+            gEpochRevenueData.dogeMiningScore[i] = gDogeMiningSharesCounter.getSharesCount(i);
         }
 
         // Revenue V2: filter transactions. Run here but have not applied yet
@@ -4691,6 +4748,7 @@ static bool saveAllNodeStates()
     nodeStateBuffer.numberOfTransactions = numberOfTransactions;    
     voteCounter.saveAllDataToArray(nodeStateBuffer.voteCounterData);
     gCustomMiningSharesCounter.saveAllDataToArray(nodeStateBuffer.customMiningSharesCounterData);
+    gDogeMiningSharesCounter.saveAllDataToArray(nodeStateBuffer.dogeMiningSharesCounterData);
 
     CHAR16 NODE_STATE_FILE_NAME[] = L"snapshotNodeMiningState";
     savedSize = save(NODE_STATE_FILE_NAME, sizeof(nodeStateBuffer), (unsigned char*)&nodeStateBuffer, directory);
@@ -4866,6 +4924,7 @@ static bool loadAllNodeStates()
     loadMiningSeedFromFile = true;
     voteCounter.loadAllDataFromArray(nodeStateBuffer.voteCounterData);
     gCustomMiningSharesCounter.loadAllDataFromArray(nodeStateBuffer.customMiningSharesCounterData);
+    gDogeMiningSharesCounter.loadAllDataFromArray(nodeStateBuffer.dogeMiningSharesCounterData);
 
     // update own computor indices
     for (unsigned int i = 0; i < NUMBER_OF_COMPUTORS; i++)

@@ -181,6 +181,15 @@ protected:
     }
 
 public:
+    // Accumulate shares directly from raw counts (no packed TX, used by DOGE)
+    void accumulateFromRawCounts(const unsigned int* sharesCount)
+    {
+        for (int i = 0; i < NUMBER_OF_COMPUTORS; i++)
+        {
+            accumulateSharesCount(i, sharesCount[i]);
+        }
+    }
+
     static constexpr unsigned int _customMiningSolutionCounterDataSize = sizeof(_shareCount) + sizeof(_accumulatedSharesCount);
     void init()
     {
