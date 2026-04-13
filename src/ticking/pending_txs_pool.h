@@ -82,10 +82,11 @@ protected:
             if (balance > 0)
             {
                 if (isZero(tx->destinationPublicKey) && tx->amount == 0LL
-                    && (tx->inputType == VOTE_COUNTER_INPUT_TYPE 
-                        || tx->inputType == CustomMiningSolutionTransaction::transactionType() 
+                    && (tx->inputType == VOTE_COUNTER_INPUT_TYPE
+                        || tx->inputType == CustomMiningSolutionTransaction::transactionType()
                         || tx->inputType == DogeMiningShareTransaction::transactionType()
-                        || tx->inputType == ExecutionFeeReportTransactionPrefix::transactionType()))
+                        || tx->inputType == ExecutionFeeReportTransactionPrefix::transactionType()
+                        || tx->inputType == OracleUserQueryTransactionPrefix::transactionType()))
                 {
                     // protocol-level tx always have max priority
                     return INT64_MAX;

@@ -6602,6 +6602,14 @@ static bool initialize()
             increaseEnergy(id(TESTEXC_CONTRACT_INDEX, 0, 0, 0), 100000000llu);
 #endif
 
+#ifndef NDEBUG
+            // Give computor keys initial balance for testnet (needed for oracle query TX in pending pool)
+            for (unsigned int i = 0; i < numberOfOwnComputorIndices; i++)
+            {
+                increaseEnergy(computorPublicKeys[ownComputorIndices[i]], 1000000000llu);
+            }
+#endif
+
             {
                 const unsigned long long beginningTick = __rdtsc();
 
