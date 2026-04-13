@@ -1533,6 +1533,14 @@ static void processBroadcastCustomMiningTask(RequestResponseHeader* header)
 #ifdef SEND_DOGE_ORACLE_QUERIES
         customQubicMiningStorage.addTask(reinterpret_cast<const CustomQubicMiningTask*>(payload), messageSize - SIGNATURE_SIZE);
         ATOMIC_INC64(gDogeMiningStats.phaseV2.tasks);
+#ifndef NDEBUG
+        {
+            CHAR16 dbg[128];
+            setText(dbg, L"DOGE: task added, jobId=");
+            appendNumber(dbg, reinterpret_cast<const CustomQubicMiningTask*>(payload)->jobId, FALSE);
+            addDebugMessage(dbg);
+        }
+#endif
 #endif
     }
 }
@@ -1588,6 +1596,9 @@ static void processBroadcastCustomMiningSolution(RequestResponseHeader* header)
                     if (customQubicMiningStorage.addSolution(sol, messageSize - SIGNATURE_SIZE, reinterpret_cast<unsigned char*>(&task)) < 0)
                     {
                         ATOMIC_INC64(gDogeMiningStats.phaseV2.duplicated);
+#ifndef NDEBUG
+                        addDebugMessage(L"DOGE: solution rejected (dup/stale)");
+#endif
                         return;
                     }
 
@@ -1627,6 +1638,16 @@ static void processBroadcastCustomMiningSolution(RequestResponseHeader* header)
                         sign(computorSubseeds[i].m256i_u8, computorPublicKeys[i].m256i_u8, digest.m256i_u8, tx->signaturePtr());
                         enqueueResponse(NULL, tx->totalSize(), BROADCAST_TRANSACTION, 0, tx);
                         pendingTxsPool.add((const Transaction*)tx);
+#ifndef NDEBUG
+                        {
+                            CHAR16 dbg[128];
+                            setText(dbg, L"DOGE: oracle query sent, tick=");
+                            appendNumber(dbg, tx->tick, FALSE);
+                            appendText(dbg, L" comp=");
+                            appendNumber(dbg, compIdFromEN2, FALSE);
+                            addDebugMessage(dbg);
+                        }
+#endif
                     }
 
                     break;
@@ -3747,16 +3768,32 @@ static void processTick(unsigned long long processorNumber)
                                 ACQUIRE(gDogeMiningSharesCountLock);
                                 gDogeMiningSharesCount[reply.compIndex]++;
                                 RELEASE(gDogeMiningSharesCountLock);
+#ifndef NDEBUG
+                                {
+                                    CHAR16 dbg[128];
+                                    setText(dbg, L"DOGE: valid share, comp=");
+                                    appendNumber(dbg, reply.compIndex, FALSE);
+                                    appendText(dbg, L" count=");
+                                    appendNumber(dbg, gDogeMiningSharesCount[reply.compIndex], FALSE);
+                                    addDebugMessage(dbg);
+                                }
+#endif
                             }
                         }
                     }
                     else
                     {
                         ATOMIC_INC64(gDogeMiningStats.phaseV2.invalid);
+#ifndef NDEBUG
+                        addDebugMessage(L"DOGE: invalid share from oracle");
+#endif
                     }
                 }
                 else
                 {
+#ifndef NDEBUG
+                    addDebugMessage(L"DOGE: oracle query failed, retrying");
+#endif
                     // Oracle query failed -> resend user query tx if it is from own comp pool
                     for (unsigned int i = 0; i < computorSeedsCount; ++i)
                     {
