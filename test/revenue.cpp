@@ -262,10 +262,6 @@ TEST(TestCoreRevenue, V2OverflowExtremeValues)
         auto dataPtr = std::make_unique<EpochRevenueData>();
         EpochRevenueData& data = *dataPtr;
         setMem(&data, sizeof(data), 0);
-        for (unsigned int i = 0; i < NUMBER_OF_COMPUTORS; i++)
-        {
-            gRevenueComponents.customMiningScore[i] = 0;
-        }
         computeRevenueV2(data);
         for (unsigned int i = 0; i < NUMBER_OF_COMPUTORS; i++)
         {
@@ -274,80 +270,3 @@ TEST(TestCoreRevenue, V2OverflowExtremeValues)
     }
 }
 
-// Simulate the revenue fomula from real data
-TEST(TestCoreRevenue, ReadFile)
-{
-    unsigned long long tx[NUMBER_OF_COMPUTORS];
-    unsigned long long votes[NUMBER_OF_COMPUTORS];
-    unsigned long long customMining[NUMBER_OF_COMPUTORS];
-    long long revenue[NUMBER_OF_COMPUTORS];
-    constexpr long long issuancePerComputor = ISSUANCE_RATE / NUMBER_OF_COMPUTORS;
-
-    for (size_t i = 0; i < REVENUE_FILES.size(); ++i)
-    {
-        // Open input file in binary mode
-        std::string input = TEST_DIR + REVENUE_FILES[i];
-        std::ifstream infile(input, std::ios::binary);
-        if (!infile)
-        {
-            std::cerr << "Error opening file: " << input << "\n";
-            std::exit(EXIT_FAILURE);
-        }
-
-        // Read transaction, vote and custom mining share
-        infile.read(reinterpret_cast<char*>(&tx), sizeof(tx));
-        if (!infile)
-        {
-            std::cerr << "Error reading tx score from file.\n";
-            std::exit(EXIT_FAILURE);
-        }
-
-        infile.read(reinterpret_cast<char*>(&votes), sizeof(votes));
-        if (!infile)
-        {
-            std::cerr << "Error reading votes score from file.\n";
-            std::exit(EXIT_FAILURE);
-        }
-
-        infile.read(reinterpret_cast<char*>(&customMining), sizeof(customMining));
-        if (!infile)
-        {
-            std::cerr << "Error reading custom mining score from file.\n";
-            std::exit(EXIT_FAILURE);
-        }
-
-        infile.close();
-
-        // Start to compute and write out data
-        computeRevenue(tx, votes, customMining, revenue);
-
-        // Write the data out for investigation
-        // Open output file in text mode
-        std::string output = input + ".csv";
-        std::ofstream outfile(output);
-        if (!outfile)
-        {
-            std::cerr << "Error opening output file: " << output << "\n";
-            std::exit(EXIT_FAILURE);
-        }
-
-        // Write CSV header
-        outfile << "Index,txScore,voteScore,customMiningScore,txScoreFactor,voteScoreFactor,customMiningScoreFactor,revenue,percentage\n";
-
-        // Write the content
-        for (int k = 0; k < NUMBER_OF_COMPUTORS; k++)
-        {
-            outfile << k << ","
-                << tx[k] << ","
-                << votes[k] << ","
-                << customMining[k] << ","
-                << gRevenueComponents.txScoreFactor[k] << ","
-                << gRevenueComponents.voteScoreFactor[k] << ","
-                << gRevenueComponents.customMiningScoreFactor[k] << ","
-                << revenue[k] << ","
-                << (double)revenue[k] * 100 / issuancePerComputor
-                << "\n";
-        }
-        outfile.close();
-    }
-}

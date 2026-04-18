@@ -36,21 +36,6 @@ static_assert(((1ULL << VOTE_COUNTER_NUM_BIT_PER_COMP) - 1)* NUMBER_OF_COMPUTORS
 static_assert(((1ULL << VOTE_COUNTER_NUM_BIT_PER_COMP) - 1)* NUMBER_OF_COMPUTORS* MAX_NUMBER_OF_TICKS_PER_EPOCH / 2 <= 0xFFFFFFFFFFFFFFFFULL / gCustomMiningScoreScalingThreshold,
     "Max value of custom mininng score can make score overflow");
 
-
-struct RevenueComponents
-{
-    unsigned long long txScore[NUMBER_OF_COMPUTORS];    // revenue score with txs
-    unsigned long long voteScore[NUMBER_OF_COMPUTORS];  // vote count
-    unsigned long long customMiningScore[NUMBER_OF_COMPUTORS]; // the shares count with custom mining
-
-    unsigned long long txScoreFactor[NUMBER_OF_COMPUTORS];
-    unsigned long long voteScoreFactor[NUMBER_OF_COMPUTORS];
-    unsigned long long customMiningScoreFactor[NUMBER_OF_COMPUTORS];
-
-    long long conservativeRevenue[NUMBER_OF_COMPUTORS];
-    long long revenue[NUMBER_OF_COMPUTORS];
-} gRevenueComponents;
-
 // Get the lower bound that start to separate the QUORUM region of score
 unsigned long long getQuorumScore(
     const unsigned long long* score,
@@ -120,55 +105,6 @@ static void computeRevFactor(
         }
 
         outputScoreFactor[computorIndex] = scoreFactor;
-    }
-}
-
-static void computeRevenue(
-    const unsigned long long* txScore,
-    const unsigned long long* voteScore,
-    const unsigned long long* customMiningScore,
-    long long* revenue = NULL)
-{
-    // Transaction score
-    copyMem(gRevenueComponents.txScore, txScore, sizeof(gRevenueComponents.txScore));
-    computeRevFactor(gRevenueComponents.txScore, gTxScoreScalingThreshold, gRevenueComponents.txScoreFactor);
-
-    // Vote score
-    copyMem(gRevenueComponents.voteScore, voteScore, sizeof(gRevenueComponents.voteScore));
-    computeRevFactor(gRevenueComponents.voteScore, gVoteScoreScalingThreshold, gRevenueComponents.voteScoreFactor);
-
-    // Custom mining score
-    copyMem(gRevenueComponents.customMiningScore, customMiningScore, sizeof(gRevenueComponents.customMiningScore));
-    computeRevFactor(gRevenueComponents.customMiningScore, gCustomMiningScoreScalingThreshold, gRevenueComponents.customMiningScoreFactor);
-
-    long long arbitratorRevenue = ISSUANCE_RATE;
-    constexpr long long issuancePerComputor = ISSUANCE_RATE / NUMBER_OF_COMPUTORS;
-    constexpr long long scalingThreshold = 0xFFFFFFFFFFFFFFFFULL / issuancePerComputor;
-    static_assert(gTxScoreScalingThreshold * gVoteScoreScalingThreshold * gCustomMiningScoreScalingThreshold <= scalingThreshold, "Normalize factor can cause overflow");
-
-    // Save data of custom mining. But not apply yet
-    {
-        for (unsigned int i = 0; i < NUMBER_OF_COMPUTORS; i++)
-        {
-            unsigned long long txFactor = gRevenueComponents.txScoreFactor[i];
-            unsigned long long voteFactor = gRevenueComponents.voteScoreFactor[i];
-            unsigned long long customFactor = gRevenueComponents.customMiningScoreFactor[i];
-            ASSERT(txFactor <= gTxScoreScalingThreshold);
-            ASSERT(voteFactor <= gVoteScoreScalingThreshold);
-            ASSERT(customFactor <= gCustomMiningScoreScalingThreshold);
-            static_assert(gTxScoreScalingThreshold * gVoteScoreScalingThreshold * gCustomMiningScoreScalingThreshold < 0xFFFFFFFFFFFFFFFFULL / issuancePerComputor);
-
-            unsigned long long combinedScoreFactor = txFactor * voteFactor * customFactor;
-
-            gRevenueComponents.revenue[i] =
-                (long long)(combinedScoreFactor * issuancePerComputor / gTxScoreScalingThreshold / gVoteScoreScalingThreshold / gCustomMiningScoreScalingThreshold);
-        }
-    }
-
-    // Apply the new revenue formula
-    if (NULL != revenue)
-    {
-        copyMem(revenue, gRevenueComponents.revenue, sizeof(gRevenueComponents.revenue));
     }
 }
 

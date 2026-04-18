@@ -144,7 +144,6 @@ static unsigned short numberOfOwnComputorIndices;
 static unsigned short ownComputorIndices[computorSeedsCount];
 static unsigned short ownComputorIndicesMapping[computorSeedsCount];
 
-static VoteCounter voteCounter;
 static ExecutionFeeReportCollector executionFeeReportCollector;
 static TickData nextTickData;
 static PendingTxsPool pendingTxsPool;
@@ -250,7 +249,6 @@ struct
     m256i currentRandomSeed;    
     int solutionPublicationTicks[MAX_NUMBER_OF_SOLUTIONS];
     unsigned long long faultyComputorFlags[(NUMBER_OF_COMPUTORS + 63) / 64];
-    unsigned char voteCounterData[VoteCounter::VoteCounterDataSize];
     BroadcastComputors broadcastedComputors;
     unsigned int resourceTestingDigest;
     unsigned int numberOfMiners;
@@ -263,7 +261,7 @@ static bool saveContractExecFeeFiles(CHAR16* directory = NULL, bool saveAccumula
 static bool saveSystem(CHAR16* directory = NULL);
 static bool loadContractStateFiles(CHAR16* directory = NULL, bool forceLoadFromFile = false);
 static bool loadContractExecFeeFiles(CHAR16* directory = NULL, bool loadAccumulatedTime = false);
-static bool saveRevenueComponents(CHAR16* directory = NULL);
+static bool saveRevenueData(CHAR16* directory = NULL);
 
 #if ENABLED_LOGGING
 #define PAUSE_BEFORE_CLEAR_MEMORY 1 // Requiring operators to press F10 to clear memory (before switching epoch)
@@ -272,14 +270,6 @@ static bool saveRevenueComponents(CHAR16* directory = NULL);
 #endif
 
 BroadcastFutureTickData broadcastedFutureTickData;
-
-static struct
-{
-    Transaction transaction;
-    unsigned char data[VOTE_COUNTER_DATA_SIZE_IN_BYTES];
-    m256i dataLock;
-    unsigned char signature[SIGNATURE_SIZE];
-} voteCounterPayload;
 
 static ExecutionFeeReportPayload executionFeeReportPayload;
 
@@ -2810,12 +2800,6 @@ static void processTickTransaction(const Transaction* transaction, unsigned int 
                 // Destination is system
                 switch (transaction->inputType)
                 {
-                case VOTE_COUNTER_INPUT_TYPE:
-                {
-                    voteCounter.processTransactionData(transaction, dataLock);
-                }
-                break;
-
                 case FileHeaderTransaction::transactionType():
                 {
                     if (transaction->amount >= FileFragmentTransactionPrefix::minAmount()
@@ -2978,47 +2962,6 @@ static void processTickTransaction(const Transaction* transaction, unsigned int 
 #if ADDON_TX_STATUS_REQUEST
         saveConfirmedTx(numberOfTransactions - 1, moneyFlew, system.tick, transactionDigest); // qli: save tx
 #endif
-    }
-}
-
-static void makeAndBroadcastTickVotesTransaction(int i, BroadcastFutureTickData& td, int txSlot)
-{
-    PROFILE_NAMED_SCOPE("processTick(): broadcast vote counter tx");
-    ASSERT(txSlot < NUMBER_OF_TRANSACTIONS_PER_TICK);
-    auto& payload = voteCounterPayload; // note: not thread-safe
-    payload.transaction.sourcePublicKey = computorPublicKeys[ownComputorIndicesMapping[i]];
-    payload.transaction.destinationPublicKey = m256i::zero();
-    payload.transaction.amount = 0;
-    payload.transaction.tick = system.tick + TICK_VOTE_COUNTER_PUBLICATION_OFFSET;
-    payload.transaction.inputType = VOTE_COUNTER_INPUT_TYPE;
-    payload.transaction.inputSize = sizeof(payload.data) + sizeof(payload.dataLock);
-    voteCounter.compressNewVotesPacket(system.tick - 675, system.tick + 1, ownComputorIndices[i], payload.data);
-    payload.dataLock = td.tickData.timelock;
-    unsigned char digest[32];
-    KangarooTwelve(&payload.transaction, sizeof(payload.transaction) + sizeof(payload.data) + sizeof(payload.dataLock), digest, sizeof(digest));
-    sign(computorSubseeds[ownComputorIndicesMapping[i]].m256i_u8, computorPublicKeys[ownComputorIndicesMapping[i]].m256i_u8, digest, payload.signature);
-    enqueueResponse(NULL, sizeof(payload), BROADCAST_TRANSACTION, 0, &payload);
-
-    // copy the content of this vote packet to local memory
-    unsigned int tickIndex = ts.tickToIndexCurrentEpoch(td.tickData.tick);
-    unsigned int transactionSize = sizeof(voteCounterPayload);
-    KangarooTwelve(&payload, transactionSize, digest, sizeof(digest));
-    auto* tsReqTickTransactionOffsets = ts.tickTransactionOffsets.getByTickIndex(tickIndex);
-    if (txSlot < NUMBER_OF_TRANSACTIONS_PER_TICK) // valid slot
-    {
-        // TODO: refactor function add transaction to txStorage
-        ts.tickTransactions.acquireLock();
-        if (!tsReqTickTransactionOffsets[txSlot]) // not yet have value
-        {
-            if (ts.nextTickTransactionOffset + transactionSize <= ts.tickTransactions.storageSpaceCurrentEpoch) //have enough space
-            {
-                td.tickData.transactionDigests[txSlot] = m256i(digest);
-                tsReqTickTransactionOffsets[txSlot] = ts.nextTickTransactionOffset;
-                copyMem(ts.tickTransactions(ts.nextTickTransactionOffset), &payload, transactionSize);
-                ts.nextTickTransactionOffset += transactionSize;
-            }
-        }
-        ts.tickTransactions.releaseLock();
     }
 }
 
@@ -3692,10 +3635,6 @@ static void processTick(unsigned long long processorNumber)
                     pendingTxsPool.releaseLock();
 
                     {
-                        // insert & broadcast vote counter tx
-                        makeAndBroadcastTickVotesTransaction(i, broadcastedFutureTickData, nextTxIndex++);
-                    }
-                    {
                         // insert & broadcast DOGE mining score packet
                         if (makeAndBroadcastCustomMiningTransaction(gDogeMiningBroadcastTxBuffer, gDogeMiningSharesCounter, i, broadcastedFutureTickData, nextTxIndex))
                         {
@@ -3961,7 +3900,6 @@ static void beginEpoch()
     ts.beginEpoch(system.initialTick);
     pendingTxsPool.beginEpoch(system.initialTick);
     oracleEngine.beginEpoch();
-    voteCounter.init();
 #ifndef NDEBUG
     ts.checkStateConsistencyWithAssert();
     pendingTxsPool.checkStateConsistencyWithAssert();
@@ -4068,43 +4006,6 @@ static void endEpoch()
     // Only issue qus if the max supply is not yet reached
     if (spectrumInfo.totalAmount + ISSUANCE_RATE <= MAX_SUPPLY)
     {
-        // Compute revenue scores of computors
-        unsigned long long revenueScore[NUMBER_OF_COMPUTORS];
-        setMem(revenueScore, sizeof(revenueScore), 0);
-        for (unsigned int tick = system.initialTick; tick < system.tick; tick++)
-        {
-            ts.tickData.acquireLock();
-            TickData& td = ts.tickData.getByTickInCurrentEpoch(tick);
-            if (td.epoch == system.epoch)
-            {
-                unsigned int numberOfTransactions = 0;
-                for (unsigned int transactionIndex = 0; transactionIndex < NUMBER_OF_TRANSACTIONS_PER_TICK; transactionIndex++)
-                {
-                    if (!isZero(td.transactionDigests[transactionIndex]))
-                    {
-                        numberOfTransactions++;
-                    }
-                }
-                revenueScore[tick % NUMBER_OF_COMPUTORS] += gTxRevenuePoints[numberOfTransactions];
-            }
-            ts.tickData.releaseLock();
-        }
-
-        // Save data of custom mining.
-        {
-            for (unsigned int i = 0; i < NUMBER_OF_COMPUTORS; i++)
-            {
-                gRevenueComponents.voteScore[i] = voteCounter.getVoteCount(i);
-                gRevenueComponents.txScore[i] = revenueScore[i];
-            }
-            setMem(gRevenueComponents.customMiningScore, sizeof(gRevenueComponents.customMiningScore), 0);
-            computeRevenue(
-                gRevenueComponents.txScore,
-                gRevenueComponents.voteScore,
-                gRevenueComponents.customMiningScore,
-                gRevenueComponents.revenue);
-        }
-
         // Collect mining scores for V2
         for (unsigned int i = 0; i < NUMBER_OF_COMPUTORS; i++)
         {
@@ -4435,8 +4336,7 @@ static bool saveAllNodeStates()
     copyMem(&nodeStateBuffer.resourceTestingDigest, &resourceTestingDigest, sizeof(resourceTestingDigest));
     nodeStateBuffer.currentRandomSeed = score->currentRandomSeed;
     nodeStateBuffer.numberOfMiners = numberOfMiners;
-    nodeStateBuffer.numberOfTransactions = numberOfTransactions;    
-    voteCounter.saveAllDataToArray(nodeStateBuffer.voteCounterData);
+    nodeStateBuffer.numberOfTransactions = numberOfTransactions;
     gDogeMiningSharesCounter.saveAllDataToArray(nodeStateBuffer.dogeMiningSharesCounterData);
 
     CHAR16 NODE_STATE_FILE_NAME[] = L"snapshotNodeMiningState";
@@ -4622,7 +4522,6 @@ static bool loadAllNodeStates()
     initialRandomSeedFromPersistingState = nodeStateBuffer.currentRandomSeed;
     numberOfTransactions = nodeStateBuffer.numberOfTransactions;
     loadMiningSeedFromFile = true;
-    voteCounter.loadAllDataFromArray(nodeStateBuffer.voteCounterData);
     gDogeMiningSharesCounter.loadAllDataFromArray(nodeStateBuffer.dogeMiningSharesCounterData);
 
     // Load V2 per-tick TX counts
@@ -5207,17 +5106,6 @@ static void updateVotesCount(unsigned int& tickNumberOfComputors, unsigned int& 
                                     saltedData[1] = m256i::zero();
                                     saltedData[1].m256i_u32[0] = etalonTick.saltedTransactionBodyDigest;
                                     KangarooTwelve(saltedData, 32 + sizeof(etalonTick.saltedTransactionBodyDigest), &saltedDigest, sizeof(etalonTick.saltedTransactionBodyDigest));
-                                    if(tick->saltedTransactionBodyDigest == saltedDigest.m256i_u32[0])
-                                    {
-                                        // to avoid submitting invalid votes (eg: all zeroes with valid signature)
-                                        // only count votes that matched etalonTick
-                                        voteCounter.registerNewVote(tick->tick, tick->computorIndex);
-                                    }
-                                }
-                                else // If expectedNextTickTransactionDigest changes to to empty due to time-out,
-                                     // we count votes anyway, otherwise we may end up with no or very few votes
-                                {
-                                    voteCounter.registerNewVote(tick->tick, tick->computorIndex);
                                 }
                             }
                         }
@@ -5710,9 +5598,7 @@ static void tickProcessor(void*)
                                     endEpoch();
 
                                     // Save the file of revenue. This blocking save can be called from any thread
-                                    saveRevenueComponents(NULL);
-                                    // Revenue v2 data
-                                    asyncSave(REVENUE_DATA_END_OF_EPOCH_FILE_NAME, sizeof(gEpochRevenueData), (unsigned char*)&gEpochRevenueData);
+                                    saveRevenueData(NULL);
 
                                     // Reorder futureComputors so requalifying computors keep their index
                                     // This is needed for correct execution fee reporting across epoch boundaries
@@ -6003,12 +5889,15 @@ static bool saveSystem(CHAR16* directory)
     return false;
 }
 
-static bool saveRevenueComponents(CHAR16* directory)
+static bool saveRevenueData(CHAR16 * directory)
 {
-    CHAR16* fn = CUSTOM_MINING_REVENUE_END_OF_EPOCH_FILE_NAME;
-    long long savedSize = asyncSave(fn, sizeof(gRevenueComponents), (unsigned char*)&gRevenueComponents, directory);
-    if (savedSize == sizeof(gRevenueComponents))
+    logToConsole(L"Saving revenue data...");
+    CHAR16 * fn = REVENUE_DATA_END_OF_EPOCH_FILE_NAME;
+    long long savedSize = asyncSave(fn, sizeof(gEpochRevenueData), (unsigned char*)&gEpochRevenueData, directory);
+    if (savedSize == sizeof(gEpochRevenueData))
     {
+        setNumber(message, savedSize, TRUE);
+        appendText(message, L" bytes of the system data are saved.");
         return true;
     }
     return false;
